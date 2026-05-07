@@ -30,10 +30,11 @@ async function addColumnIfMissing(table: string, column: string, def: string) {
 
 const ACT_DEF = `INTEGER NOT NULL DEFAULT 1`;
 
-// Sentinel migration name — when present in `_migrations`, schema is at v2 and
-// `runInit` short-circuits after a single SELECT. This is the cold-start fast
-// path: previously every cold container ran 8+ ALTER TABLE round-trips.
-const SCHEMA_SENTINEL = 'schema_v2';
+// Sentinel migration name — when present in `_migrations`, schema is current
+// and `runInit` short-circuits after a single SELECT. This is the cold-start
+// fast path: previously every cold container ran 8+ ALTER TABLE round-trips.
+// Bump this string whenever the schema or migration block changes.
+const SCHEMA_SENTINEL = 'schema_v3';
 
 export async function getDb() {
   if (ready) return db;
@@ -49,7 +50,7 @@ export async function getDb() {
 }
 
 async function runInit() {
-  // Fast path — single round-trip when schema is already at v2.
+  // Fast path — single round-trip when schema sentinel is already recorded.
   // Wrapped in try/catch because `_migrations` may not exist on a fresh DB.
   try {
     const r = await db.execute(
@@ -99,6 +100,7 @@ async function runInit() {
       completed_at INTEGER,
       is_archived  INTEGER NOT NULL DEFAULT 0   CHECK (is_archived IN (0,1)),
       is_active    INTEGER NOT NULL DEFAULT 1   CHECK (is_active IN (0,1)),
+      cancelled    INTEGER NOT NULL DEFAULT 0   CHECK (cancelled IN (0,1)),
       created_at   INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
     );
     CREATE TABLE IF NOT EXISTS tags (
@@ -126,6 +128,7 @@ async function runInit() {
   await addColumnIfMissing('tasks',    'is_active', ACT_DEF);
   await addColumnIfMissing('tags',     'is_active', ACT_DEF);
   await addColumnIfMissing('settings', 'is_active', ACT_DEF);
+  await addColumnIfMissing('tasks',    'cancelled',  'INTEGER NOT NULL DEFAULT 0');
 
   // Drop the now-unused `origin_hue` column on existing DBs. The frontend
   // derives the archive hue from `col_key` instead. ALTER TABLE DROP COLUMN
@@ -178,6 +181,7 @@ export function rowToTask(row: Record<string, unknown>) {
     due:         (row.due         as string | null) ?? null,
     tag:         (row.tag         as string | null) ?? null,
     done:        row.done        === 1,
+    cancelled:   row.cancelled   === 1,
     priority:    row.priority    as string,
     completedAt: (row.completed_at as number | null) ?? null,
     colKey:      (row.col_key     as string | null) ?? null,
@@ -192,7 +196,8 @@ export async function sweepArchive(userId: number) {
   const probe = await db.execute({
     sql: `SELECT 1 FROM tasks
           WHERE user_id = ? AND is_active = 1 AND is_archived = 0
-            AND done = 1 AND completed_at IS NOT NULL AND completed_at < ?
+            AND (done = 1 OR cancelled = 1)
+            AND completed_at IS NOT NULL AND completed_at < ?
           LIMIT 1`,
     args: [userId, cutoff],
   });
@@ -200,8 +205,9 @@ export async function sweepArchive(userId: number) {
   await db.execute({
     sql: `UPDATE tasks
           SET is_archived = 1
-          WHERE done = 1 AND completed_at IS NOT NULL
-            AND completed_at < ? AND is_archived = 0 AND is_active = 1 AND user_id = ?`,
-    args: [cutoff, userId],
+          WHERE user_id = ? AND is_active = 1 AND is_archived = 0
+            AND (done = 1 OR cancelled = 1)
+            AND completed_at IS NOT NULL AND completed_at < ?`,
+    args: [userId, cutoff],
   });
 }

@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
   await sweepArchive(userId);
   const db = await getDb();
   const result = await db.execute({
-    sql: `SELECT id, col_key, text, due, tag, done, priority, completed_at
+    sql: `SELECT id, col_key, text, due, tag, done, cancelled, priority, completed_at
           FROM tasks
           WHERE is_archived = 0 AND is_active = 1 AND user_id = ?
           ORDER BY created_at DESC`,

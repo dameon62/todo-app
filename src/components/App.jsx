@@ -50,12 +50,29 @@ const fireAndForget = (p) => { p.catch(err => console.warn('mutation failed:', e
 
 const EMPTY_BOARD = { short: [], medium: [], long: [] };
 
-// Deterministic color from tag name — same name always gets the same color
+// Deterministic color from tag name — same name always gets the same color.
+// 30 entries: 10 hue families × 3 shades (dark / mid / light).
 const TAG_PALETTE = [
-  'oklch(0.65 0.19 25)',  'oklch(0.65 0.19 60)',  'oklch(0.65 0.19 95)',
-  'oklch(0.65 0.19 145)', 'oklch(0.65 0.19 185)', 'oklch(0.65 0.19 220)',
-  'oklch(0.65 0.19 260)', 'oklch(0.65 0.19 295)', 'oklch(0.65 0.19 330)',
-  'oklch(0.70 0.15 165)', 'oklch(0.70 0.15 245)', 'oklch(0.68 0.17 355)',
+  // Red
+  'oklch(0.55 0.24 12)',  'oklch(0.64 0.22 17)',  'oklch(0.74 0.15 20)',
+  // Orange
+  'oklch(0.58 0.22 38)',  'oklch(0.67 0.21 43)',  'oklch(0.76 0.14 48)',
+  // Amber
+  'oklch(0.62 0.19 68)',  'oklch(0.71 0.17 74)',  'oklch(0.79 0.12 80)',
+  // Lime
+  'oklch(0.58 0.17 100)', 'oklch(0.67 0.16 108)', 'oklch(0.75 0.12 115)',
+  // Green
+  'oklch(0.54 0.20 148)', 'oklch(0.63 0.18 144)', 'oklch(0.72 0.14 140)',
+  // Teal
+  'oklch(0.56 0.18 188)', 'oklch(0.65 0.16 184)', 'oklch(0.74 0.11 178)',
+  // Blue
+  'oklch(0.52 0.23 228)', 'oklch(0.62 0.21 222)', 'oklch(0.72 0.15 216)',
+  // Indigo
+  'oklch(0.50 0.24 268)', 'oklch(0.60 0.22 264)', 'oklch(0.70 0.16 258)',
+  // Purple
+  'oklch(0.52 0.24 298)', 'oklch(0.62 0.22 294)', 'oklch(0.72 0.16 289)',
+  // Pink
+  'oklch(0.55 0.23 332)', 'oklch(0.65 0.21 328)', 'oklch(0.75 0.15 322)',
 ];
 function tagColor(name) {
   if (!name) return 'var(--ink-3)';
@@ -209,14 +226,31 @@ function usePopover(onClose) {
     if (top < m) top = m;
     el.style.top = `${top}px`;
 
-    // Raise host column above sibling columns (z-index: 2) while popup is open
+    const cleanups = [];
+
+    // Raise host column above sibling columns while popup is open
     let colEl = trigger;
     while (colEl && !colEl.classList.contains('col')) colEl = colEl.parentElement;
     if (colEl) {
-      const prev = colEl.style.zIndex;
+      const prevZ = colEl.style.zIndex;
       colEl.style.zIndex = '50';
-      return () => { colEl.style.zIndex = prev; };
+      cleanups.push(() => { colEl.style.zIndex = prevZ; });
     }
+
+    // Also raise the host col-sub-pane above its sibling sub-pane.
+    // Without this, in split-pane columns (Short term) the popup from the
+    // left pane is painted behind the right pane's tasks (later in DOM order).
+    let paneEl = trigger;
+    while (paneEl && !paneEl.classList.contains('col-sub-pane')) paneEl = paneEl.parentElement;
+    if (paneEl && paneEl !== colEl) {
+      const prevZ = paneEl.style.zIndex;
+      const prevP = paneEl.style.position;
+      paneEl.style.position = 'relative';
+      paneEl.style.zIndex   = '2';
+      cleanups.push(() => { paneEl.style.zIndex = prevZ; paneEl.style.position = prevP; });
+    }
+
+    if (cleanups.length) return () => cleanups.forEach(fn => fn());
   }, []);
 
   return ref;
@@ -459,14 +493,14 @@ function TopBar({ theme, onToggleTheme, query, setQuery, view, setView, archiveC
 }
 
 // ---------- Task row ----------
-function TaskRow({ task, colHue, tags, onToggle, onPatch, onAddTag, archiveView, hideDate }) {
+function TaskRow({ task, colHue, tags, onToggle, onCancelTask, onPatch, onAddTag, archiveView, hideDate }) {
   const [tagOpen, setTagOpen] = useState(false);
   const [dateOpen, setDateOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(task.text);
 
-  const overdue = !task.done && isOverdue(task.due);
-  const readOnly = !!archiveView;
+  const overdue   = !task.done && !task.cancelled && isOverdue(task.due);
+  const readOnly  = !!archiveView || task.done || task.cancelled;
 
   const saveText = () => {
     const v = draft.trim();
@@ -476,18 +510,18 @@ function TaskRow({ task, colHue, tags, onToggle, onPatch, onAddTag, archiveView,
   };
 
   return (
-    <li className={`task ${task.done ? 'is-done' : ''} ${overdue ? 'is-overdue' : ''} ${readOnly ? 'read-only' : ''}`} data-hue={colHue}>
+    <li className={`task ${task.done ? 'is-done' : ''} ${task.cancelled ? 'is-cancelled' : ''} ${overdue ? 'is-overdue' : ''} ${readOnly ? 'read-only' : ''}`} data-hue={colHue}>
       <button
-        className={`check ${task.done ? 'on' : ''}`}
-        onClick={() => { if (!task.done) onToggle(task.id); }}
-        disabled={task.done}
-        aria-label="Mark complete"
+        className={`check ${task.done ? 'on' : ''} ${task.cancelled ? 'cancelled' : ''}`}
+        onClick={() => { if (!task.done && !task.cancelled) onToggle(task.id); }}
+        disabled={task.done || task.cancelled}
+        aria-label={task.cancelled ? 'Cancelled' : 'Mark complete'}
       >
-        <Icon.Check className="check-icon" />
+        {task.cancelled ? <Icon.X width="14" height="14" className="check-icon" /> : <Icon.Check className="check-icon" />}
       </button>
 
       <div className="task-body">
-        {editing && !readOnly && !task.done ? (
+        {editing && !readOnly && !task.done && !task.cancelled ? (
           <input
             autoFocus
             className="task-text-input"
@@ -503,7 +537,7 @@ function TaskRow({ task, colHue, tags, onToggle, onPatch, onAddTag, archiveView,
         ) : (
           <div
             className="task-text"
-            onClick={() => { if (!readOnly && !task.done) { setDraft(task.text); setEditing(true); } }}
+            onClick={() => { if (!readOnly && !task.done && !task.cancelled) { setDraft(task.text); setEditing(true); } }}
             title={readOnly || task.done ? '' : 'Click to edit'}
           >
             {task.text}
@@ -556,12 +590,21 @@ function TaskRow({ task, colHue, tags, onToggle, onPatch, onAddTag, archiveView,
             <>
               <span className="dot-sep">·</span>
               <span className="archived-ago">
-                archived {Math.round((Date.now() - task.completedAt) / DAY)}d ago
+                {task.cancelled ? 'cancelled' : 'archived'} {Math.round((Date.now() - task.completedAt) / DAY)}d ago
               </span>
             </>
           )}
         </div>
       </div>
+      {!readOnly && !task.done && !task.cancelled && (
+        <button
+          className="task-cancel-btn"
+          onClick={() => onCancelTask(task.id)}
+          title="Cancel task"
+        >
+          <Icon.X />
+        </button>
+      )}
     </li>
   );
 }
@@ -633,13 +676,13 @@ function NewTaskComposer({ colKey, tags, onAdd, onAddTag, onCancel, noDueDate })
 }
 
 // ---------- Column ----------
-function Column({ col, tasks, hoveredKey, setHoveredKey, tags, onToggle, onPatch, onAdd, onAddTag, popStrength }) {
+function Column({ col, tasks, hoveredKey, setHoveredKey, tags, onToggle, onCancelTask, onPatch, onAdd, onAddTag, popStrength }) {
   const [adding, setAdding] = useState(false);
 
   const open = hoveredKey === col.key;
   const dimmed = hoveredKey && hoveredKey !== col.key;
 
-  const remaining = tasks.filter((t) => !t.done).length;
+  const remaining = tasks.filter((t) => !t.done && !t.cancelled).length;
   const total = tasks.length;
 
   const baseGrow = col.flex;
@@ -664,6 +707,7 @@ function Column({ col, tasks, hoveredKey, setHoveredKey, tags, onToggle, onPatch
           colHue={col.hue}
           tags={tags}
           onToggle={onToggle}
+          onCancelTask={onCancelTask}
           onPatch={onPatch}
           onAddTag={onAddTag}
           hideDate={col.noDueDate}
@@ -813,14 +857,14 @@ function ArchiveView({ archived }) {
             <h2 className="archive-title">
               <Icon.Archive /> Archive
             </h2>
-            <div className="archive-sub">Completed tasks older than 30 days — auto-archived, read-only</div>
+            <div className="archive-sub">Completed and cancelled tasks older than 30 days — auto-archived, read-only</div>
           </div>
         </div>
         {archived.length === 0 ? (
           <div className="archive-empty">
             <div className="archive-empty-icon"><Icon.Archive /></div>
             <div>Nothing archived yet.</div>
-            <div className="archive-empty-hint">Tasks you complete are automatically archived 30 days later.</div>
+            <div className="archive-empty-hint">Tasks you complete or cancel are automatically archived 30 days later.</div>
           </div>
         ) : (
           <ul className="tasks archive-list">
@@ -937,6 +981,20 @@ export default function App() {
     fireAndForget(api.patchTask(id, { done: 1, completed_at: now }));
   };
 
+  const onCancelTask = (id) => {
+    const now = Date.now();
+    setBoard((prev) => {
+      const next = { ...prev };
+      for (const k of Object.keys(next)) {
+        next[k] = next[k].map((t) =>
+          t.id === id && !t.done && !t.cancelled ? { ...t, cancelled: true, completedAt: now } : t
+        );
+      }
+      return next;
+    });
+    fireAndForget(api.patchTask(id, { cancelled: 1, completed_at: now }));
+  };
+
   const onPatch = (id, patch) => {
     setBoard((prev) => {
       const next = { ...prev };
@@ -952,7 +1010,7 @@ export default function App() {
     setBoard((prev) => ({
       ...prev,
       [colKey]: [
-        { id, text, tag, due, done: false, priority: 'med', completedAt: null },
+        { id, text, tag, due, done: false, cancelled: false, priority: 'med', completedAt: null },
         ...prev[colKey],
       ],
     }));
@@ -1004,8 +1062,10 @@ export default function App() {
       : list;
   };
 
-  const totalOpen = Object.values(board).flat().filter((t) => !t.done).length;
-  const totalDone = Object.values(board).flat().filter((t) => t.done).length;
+  const allTasks      = Object.values(board).flat();
+  const totalOpen     = allTasks.filter((t) => !t.done && !t.cancelled).length;
+  const totalDone     = allTasks.filter((t) => t.done).length;
+  const totalCancelled = allTasks.filter((t) => t.cancelled).length;
 
   if (loading) {
     return (
@@ -1043,6 +1103,7 @@ export default function App() {
                 setHoveredKey={setHoveredKey}
                 tags={tags}
                 onToggle={onToggle}
+                onCancelTask={onCancelTask}
                 onPatch={onPatch}
                 onAdd={onAdd}
                 onAddTag={onAddTag}
@@ -1061,6 +1122,8 @@ export default function App() {
         <span>{totalOpen} open</span>
         <span className="dot-sep">·</span>
         <span>{totalDone} done</span>
+        <span className="dot-sep">·</span>
+        <span>{totalCancelled} cancelled</span>
         <span className="dot-sep">·</span>
         <span>{archive.length} archived</span>
         <span className="spacer" />

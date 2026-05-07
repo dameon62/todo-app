@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
 
   const db = await getDb();
   const result = await db.execute({
-    sql: `SELECT id, col_key, text, due, tag, done, priority, completed_at
+    sql: `SELECT id, col_key, text, due, tag, done, cancelled, priority, completed_at
           FROM tasks
           WHERE is_archived = 1 AND is_active = 1 AND user_id = ?
           ORDER BY completed_at DESC`,
