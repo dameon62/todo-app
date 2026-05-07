@@ -48,13 +48,17 @@ export default function LoginScreen({ onLogin }) {
     setBusy(false);
     if (res.error) {
       setError(
-        res.error === 'Username taken'   ? 'That username is already taken' :
-        res.error === 'User limit reached' ? 'Max 3 users allowed'          :
+        res.error === 'Username taken'     ? 'That username is already taken' :
+        res.error === 'User limit reached' ? 'Max 3 users allowed'            :
         res.error
       );
       return;
     }
-    onLogin(res);
+    // Refresh user list and return to selection screen — user logs in manually
+    const updated = await api.getUsers();
+    setUsers(updated);
+    setNewUser(''); setNewPass('');
+    setView('list');
   };
 
   return (
@@ -114,7 +118,7 @@ export default function LoginScreen({ onLogin }) {
             <div className="ls-actions">
               <button type="button" className="composer-btn ghost" onClick={goList}>Back</button>
               <button type="submit" className="composer-btn primary" disabled={!password || busy}>
-                {busy ? 'Signing in…' : 'Sign in'}
+                {busy ? 'Logging in…' : 'Log in'}
               </button>
             </div>
           </form>

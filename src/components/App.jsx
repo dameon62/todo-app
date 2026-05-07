@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import * as api from '@/lib/api.js';
 import LoginScreen from '@/components/LoginScreen.jsx';
 
@@ -30,6 +30,20 @@ const fmtDue = (iso) => {
 const isOverdue = (iso) => iso && new Date(iso + 'T23:59:59') < new Date();
 
 const EMPTY_BOARD = { short: [], medium: [], long: [] };
+
+// Deterministic color from tag name — same name always gets the same color
+const TAG_PALETTE = [
+  'oklch(0.65 0.19 25)',  'oklch(0.65 0.19 60)',  'oklch(0.65 0.19 95)',
+  'oklch(0.65 0.19 145)', 'oklch(0.65 0.19 185)', 'oklch(0.65 0.19 220)',
+  'oklch(0.65 0.19 260)', 'oklch(0.65 0.19 295)', 'oklch(0.65 0.19 330)',
+  'oklch(0.70 0.15 165)', 'oklch(0.70 0.15 245)', 'oklch(0.68 0.17 355)',
+];
+function tagColor(name) {
+  if (!name) return 'var(--ink-3)';
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return TAG_PALETTE[h % TAG_PALETTE.length];
+}
 
 const COLUMNS = [
   { key: 'short',  title: 'Short term',  subtitle: 'This month',   flex: 50, hue: 'green', noDueDate: false, split: true },
@@ -102,47 +116,84 @@ const Icon = {
   ),
 };
 
-// ---------- Popover (click-outside + ESC) ----------
+// ---------- Popover (click-outside + ESC + hover-close) ----------
 function usePopover(onClose) {
-  const ref = useRef(null);
-  useEffect(() => {
-    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
-    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('mousedown', onDoc);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDoc);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [onClose]);
+  const ref      = useRef(null);
+  const timerRef = useRef(null);
+  const closeRef = useRef(onClose);
 
-  // Clamp to viewport on every open — checks all 4 edges
+  // Keep closeRef current without causing the listener effect to re-run.
+  // This is critical: if the listener effect depended on onClose directly,
+  // React re-renders (e.g. hoveredKey changing) would recreate onClose,
+  // trigger cleanup, and cancel any pending close timer — keeping the popup open.
+  useEffect(() => { closeRef.current = onClose; }, [onClose]);
+
   useEffect(() => {
+    const el      = ref.current;
+    const trigger = el?.parentElement;
+
+    const cancel        = () => clearTimeout(timerRef.current);
+    const scheduleClose = () => { timerRef.current = setTimeout(() => closeRef.current(), 150); };
+    const doClose       = () => closeRef.current();
+
+    const onDoc          = (e) => { if (el && !el.contains(e.target)) doClose(); };
+    const onKey          = (e) => { if (e.key === 'Escape') doClose(); };
+    const onPopEnter     = ()  => cancel();
+    const onPopLeave     = ()  => doClose();
+    const onTriggerLeave = ()  => scheduleClose();
+
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown',   onKey);
+    el?.addEventListener('mouseenter',  onPopEnter);
+    el?.addEventListener('mouseleave',  onPopLeave);
+    trigger?.addEventListener('mouseleave', onTriggerLeave);
+
+    return () => {
+      cancel();
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown',   onKey);
+      el?.removeEventListener('mouseenter',  onPopEnter);
+      el?.removeEventListener('mouseleave',  onPopLeave);
+      trigger?.removeEventListener('mouseleave', onTriggerLeave);
+    };
+  }, []); // empty deps — listeners set up once on mount; onClose always via ref
+
+  // Switch to position:fixed (escapes overflow containers) and boost the
+  // host column's z-index so the popup paints above sibling columns.
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const r = el.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const m = 8; // minimum margin from viewport edge
+    const trigger = el.parentElement;
+    if (!trigger) return;
 
-    // Horizontal: if overflows right, anchor to right edge of trigger instead
-    if (r.right > vw - m) {
-      el.style.left = 'auto';
-      el.style.right = '0';
-    }
-    // Horizontal: if somehow overflows left, push right
-    if (r.left < m) {
-      el.style.left = `${m}px`;
-    }
-    // Vertical: if overflows bottom, flip above trigger
-    if (r.bottom > vh - m) {
-      el.style.top = 'auto';
-      el.style.bottom = 'calc(100% + 6px)';
-    }
-    // Vertical: if overflows top (e.g. flipped on tiny screen), clamp
-    if (r.top < m) {
-      el.style.top = `${m}px`;
-      el.style.bottom = 'auto';
+    const tr  = trigger.getBoundingClientRect();
+    const er  = el.getBoundingClientRect();
+    const vw  = window.innerWidth;
+    const vh  = window.innerHeight;
+    const m   = 8;
+    const gap = 6;
+
+    el.style.position = 'fixed';
+    el.style.bottom   = 'auto';
+    el.style.right    = 'auto';
+
+    let left = tr.left;
+    if (left + er.width > vw - m) left = vw - m - er.width;
+    if (left < m) left = m;
+    el.style.left = `${left}px`;
+
+    let top = tr.bottom + gap;
+    if (top + er.height > vh - m) top = tr.top - gap - er.height;
+    if (top < m) top = m;
+    el.style.top = `${top}px`;
+
+    // Raise host column above sibling columns (z-index: 2) while popup is open
+    let colEl = trigger;
+    while (colEl && !colEl.classList.contains('col')) colEl = colEl.parentElement;
+    if (colEl) {
+      const prev = colEl.style.zIndex;
+      colEl.style.zIndex = '50';
+      return () => { colEl.style.zIndex = prev; };
     }
   }, []);
 
@@ -164,7 +215,7 @@ function TagPicker({ value, tags, onPick, onAddTag, onClose }) {
       <div className="pop-list">
         {filtered.map((t) => (
           <button key={t} className={`pop-item ${t === value ? 'on' : ''}`} onClick={() => { onPick(t); onClose(); }}>
-            <span className="tag-dot" style={{ background: `var(--tag-${t.toLowerCase()}, oklch(0.72 0.1 200))` }} />
+            <span className="tag-dot" style={{ background: tagColor(t) }} />
             <span>{t}</span>
             {t === value && <span className="pop-check"><Icon.Check /></span>}
           </button>
@@ -285,7 +336,7 @@ function TopBar({ theme, onToggleTheme, query, setQuery, view, setView, archiveC
         <span className="quote-mark" aria-hidden>[</span>
         <span className="quote-word w-d">Discipline</span>
         <span className="quote-sep" aria-hidden>/</span>
-        <span className="quote-word w-de">Decisive</span>
+        <span className="quote-word w-de">Decisiveness</span>
         <span className="quote-sep" aria-hidden>/</span>
         <span className="quote-word w-dd">Dedication</span>
         <span className="quote-sep" aria-hidden>/</span>
@@ -340,6 +391,7 @@ function TaskRow({ task, colHue, tags, onToggle, onPatch, onAddTag, archiveView,
             autoFocus
             className="task-text-input"
             value={draft}
+            maxLength={150}
             onChange={(e) => setDraft(e.target.value)}
             onBlur={saveText}
             onKeyDown={(e) => {
@@ -363,7 +415,7 @@ function TaskRow({ task, colHue, tags, onToggle, onPatch, onAddTag, archiveView,
               disabled={readOnly}
               onClick={(e) => { if (readOnly) return; e.stopPropagation(); setTagOpen((v) => !v); setDateOpen(false); }}
             >
-              <span className="tag-dot" style={{ background: `var(--tag-${(task.tag || '').toLowerCase()}, var(--ink-3))` }} />
+              <span className="tag-dot" style={{ background: tagColor(task.tag) }} />
               <span>{task.tag || 'No tag'}</span>
             </button>
             {tagOpen && !readOnly && (
@@ -437,6 +489,7 @@ function NewTaskComposer({ colKey, tags, onAdd, onAddTag, onCancel, noDueDate })
         <input
           ref={inputRef}
           value={text}
+          maxLength={150}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') submit();
@@ -444,12 +497,17 @@ function NewTaskComposer({ colKey, tags, onAdd, onAddTag, onCancel, noDueDate })
           }}
           placeholder="What needs doing?"
         />
+        {text.length > 120 && (
+          <span className="composer-charcount" style={{ color: text.length >= 150 ? 'var(--hue-red-ink)' : 'var(--ink-3)' }}>
+            {150 - text.length}
+          </span>
+        )}
       </div>
       <div className="composer-meta">
         <div className="composer-chips">
           <div className="meta-chip-wrap">
             <button className="meta-chip tag-chip" onClick={() => { setTagOpen((v) => !v); setDateOpen(false); }}>
-              <span className="tag-dot" style={{ background: `var(--tag-${(tag || '').toLowerCase()}, var(--ink-3))` }} />
+              <span className="tag-dot" style={{ background: tagColor(tag) }} />
               <span>{tag || 'Tag'}</span>
             </button>
             {tagOpen && <TagPicker value={tag} tags={tags} onPick={setTag} onAddTag={onAddTag} onClose={() => setTagOpen(false)} />}
@@ -625,7 +683,7 @@ function TagItem({ name, count, onRename, onDelete }) {
   };
   return (
     <li className="tag-item">
-      <span className="tag-dot" style={{ background: `var(--tag-${name.toLowerCase()}, var(--ink-3))` }} />
+      <span className="tag-dot" style={{ background: tagColor(name) }} />
       {editing ? (
         <input
           autoFocus
@@ -822,10 +880,9 @@ export default function App() {
 
   const filterAndSort = (list) => {
     const q = query.trim().toLowerCase();
-    let out = q ? list.filter((t) => t.text.toLowerCase().includes(q) || (t.tag || '').toLowerCase().includes(q)) : list;
-    out = [...out].sort((a, b) => (a.due || '9999-12-31').localeCompare(b.due || '9999-12-31'));
-    out = [...out].sort((a, b) => Number(a.done) - Number(b.done));
-    return out;
+    return q
+      ? list.filter((t) => t.text.toLowerCase().includes(q) || (t.tag || '').toLowerCase().includes(q))
+      : list;
   };
 
   const totalOpen = Object.values(board).flat().filter((t) => !t.done).length;

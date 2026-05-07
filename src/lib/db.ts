@@ -7,6 +7,17 @@ const db = createClient({
 
 let ready = false;
 
+// Safe ALTER TABLE — silently skips if column already exists
+async function addColumn(table: string, column: string, def: string) {
+  try {
+    await db.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${def}`);
+  } catch {
+    // column already exists
+  }
+}
+
+const TS_DEF = `TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))`;
+
 export async function getDb() {
   if (ready) return db;
 
@@ -24,9 +35,10 @@ export async function getDb() {
 
   await db.executeMultiple(`
     CREATE TABLE IF NOT EXISTS users (
-      id       INTEGER PRIMARY KEY,
-      username TEXT    UNIQUE NOT NULL,
-      password TEXT    NOT NULL
+      id         INTEGER PRIMARY KEY,
+      username   TEXT    UNIQUE NOT NULL,
+      password   TEXT    NOT NULL,
+      created_on TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
     );
     CREATE TABLE IF NOT EXISTS tasks (
       id           TEXT    PRIMARY KEY,
@@ -40,20 +52,46 @@ export async function getDb() {
       completed_at INTEGER,
       is_archived  INTEGER NOT NULL DEFAULT 0,
       origin_hue   TEXT,
-      created_at   INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      created_at   INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      created_on   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
     );
     CREATE TABLE IF NOT EXISTS tags (
-      user_id  INTEGER NOT NULL REFERENCES users(id),
-      name     TEXT    NOT NULL,
+      user_id    INTEGER NOT NULL REFERENCES users(id),
+      name       TEXT    NOT NULL,
+      created_on TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
       PRIMARY KEY (user_id, name)
     );
     CREATE TABLE IF NOT EXISTS settings (
-      user_id  INTEGER NOT NULL REFERENCES users(id),
-      key      TEXT    NOT NULL,
-      value    TEXT    NOT NULL,
+      user_id    INTEGER NOT NULL REFERENCES users(id),
+      key        TEXT    NOT NULL,
+      value      TEXT    NOT NULL,
+      created_on TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
       PRIMARY KEY (user_id, key)
     );
   `);
+
+  // Migrate existing tables that predate created_on
+  await addColumn('users',    'created_on', TS_DEF);
+  await addColumn('tasks',    'created_on', TS_DEF);
+  await addColumn('tags',     'created_on', TS_DEF);
+  await addColumn('settings', 'created_on', TS_DEF);
+
+  // One-time migration: delete pre-seeded default tags
+  await db.executeMultiple(`
+    CREATE TABLE IF NOT EXISTS _migrations (
+      name       TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+    );
+  `);
+  const tagMigDone = await db.execute(
+    `SELECT name FROM _migrations WHERE name = 'remove_default_tags'`
+  );
+  if (tagMigDone.rows.length === 0) {
+    await db.execute(
+      `DELETE FROM tags WHERE name IN ('Work','Admin','Home','Health','Product','Hiring','Team','Personal')`
+    );
+    await db.execute(`INSERT INTO _migrations (name) VALUES ('remove_default_tags')`);
+  }
 
   ready = true;
   return db;
@@ -90,5 +128,3 @@ export async function sweepArchive(userId: number) {
     args: [cutoff, userId],
   });
 }
-
-export const DEFAULT_TAGS = ['Work', 'Admin', 'Home', 'Health', 'Product', 'Hiring', 'Team', 'Personal'];

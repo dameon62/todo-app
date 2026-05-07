@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb, DEFAULT_TAGS } from '@/lib/db';
+import { getDb } from '@/lib/db';
 
 export async function POST(req: NextRequest) {
   const { username, password } = await req.json();
@@ -27,17 +27,11 @@ export async function POST(req: NextRequest) {
   });
   const userId = Number(inserted.lastInsertRowid);
 
-  // Seed default tags and theme for new user
-  await db.batch([
-    ...DEFAULT_TAGS.map(name => ({
-      sql: 'INSERT OR IGNORE INTO tags (user_id, name) VALUES (?, ?)',
-      args: [userId, name],
-    })),
-    {
-      sql: `INSERT OR IGNORE INTO settings (user_id, key, value) VALUES (?, 'theme', 'dark')`,
-      args: [userId],
-    },
-  ]);
+  // Seed default theme for new user
+  await db.execute({
+    sql: `INSERT OR IGNORE INTO settings (user_id, key, value) VALUES (?, 'theme', 'dark')`,
+    args: [userId],
+  });
 
   return NextResponse.json({ id: userId, username: username.trim() });
 }
