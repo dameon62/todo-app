@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
   }
   const db = await getDb();
 
-  const countRes = await db.execute('SELECT COUNT(*) as c FROM users');
+  const countRes = await db.execute('SELECT COUNT(*) as c FROM users WHERE is_active = 1');
   if (Number((countRes.rows[0] as any).c) >= 3) {
     return NextResponse.json({ error: 'User limit reached' }, { status: 403 });
   }

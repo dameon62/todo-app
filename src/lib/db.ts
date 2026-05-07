@@ -38,6 +38,7 @@ export async function getDb() {
       id         INTEGER PRIMARY KEY,
       username   TEXT    UNIQUE NOT NULL,
       password   TEXT    NOT NULL,
+      is_active  INTEGER NOT NULL DEFAULT 1,
       created_on TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
     );
     CREATE TABLE IF NOT EXISTS tasks (
@@ -51,6 +52,7 @@ export async function getDb() {
       priority     TEXT    NOT NULL DEFAULT 'med',
       completed_at INTEGER,
       is_archived  INTEGER NOT NULL DEFAULT 0,
+      is_active    INTEGER NOT NULL DEFAULT 1,
       origin_hue   TEXT,
       created_at   INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
       created_on   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
@@ -58,6 +60,7 @@ export async function getDb() {
     CREATE TABLE IF NOT EXISTS tags (
       user_id    INTEGER NOT NULL REFERENCES users(id),
       name       TEXT    NOT NULL,
+      is_active  INTEGER NOT NULL DEFAULT 1,
       created_on TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
       PRIMARY KEY (user_id, name)
     );
@@ -65,16 +68,40 @@ export async function getDb() {
       user_id    INTEGER NOT NULL REFERENCES users(id),
       key        TEXT    NOT NULL,
       value      TEXT    NOT NULL,
+      is_active  INTEGER NOT NULL DEFAULT 1,
       created_on TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
       PRIMARY KEY (user_id, key)
     );
   `);
 
-  // Migrate existing tables that predate created_on
+  // Indexes — created after tables so IF NOT EXISTS is always safe
+  await db.executeMultiple(`
+    CREATE INDEX IF NOT EXISTS idx_tasks_board
+      ON tasks(user_id, is_active, is_archived, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_tasks_archive
+      ON tasks(user_id, is_active, is_archived, completed_at);
+
+    CREATE INDEX IF NOT EXISTS idx_tasks_tag
+      ON tasks(user_id, tag);
+
+    CREATE INDEX IF NOT EXISTS idx_tags_user_active
+      ON tags(user_id, is_active);
+
+    CREATE INDEX IF NOT EXISTS idx_users_active
+      ON users(is_active, username);
+  `);
+
+  // Migrate existing tables that predate created_on / is_active
   await addColumn('users',    'created_on', TS_DEF);
   await addColumn('tasks',    'created_on', TS_DEF);
   await addColumn('tags',     'created_on', TS_DEF);
   await addColumn('settings', 'created_on', TS_DEF);
+  const ACT_DEF = 'INTEGER NOT NULL DEFAULT 1';
+  await addColumn('users',    'is_active', ACT_DEF);
+  await addColumn('tasks',    'is_active', ACT_DEF);
+  await addColumn('tags',     'is_active', ACT_DEF);
+  await addColumn('settings', 'is_active', ACT_DEF);
 
   // One-time migration: delete pre-seeded default tags
   await db.executeMultiple(`
@@ -123,7 +150,7 @@ export async function sweepArchive(userId: number) {
                           ELSE               'blue'
                         END
       WHERE done = 1 AND completed_at IS NOT NULL
-        AND completed_at < ? AND is_archived = 0 AND user_id = ?
+        AND completed_at < ? AND is_archived = 0 AND is_active = 1 AND user_id = ?
     `,
     args: [cutoff, userId],
   });

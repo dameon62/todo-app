@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
   await sweepArchive(userId);
   const db = await getDb();
   const result = await db.execute({
-    sql: 'SELECT * FROM tasks WHERE is_archived = 0 AND user_id = ? ORDER BY created_at DESC',
+    sql: 'SELECT * FROM tasks WHERE is_archived = 0 AND is_active = 1 AND user_id = ? ORDER BY created_at DESC',
     args: [userId],
   });
   const board: Record<string, ReturnType<typeof rowToTask>[]> = { short: [], medium: [], long: [] };

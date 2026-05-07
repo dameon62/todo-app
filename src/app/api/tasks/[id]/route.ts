@@ -5,6 +5,7 @@ import { getUserId, unauthorized } from '@/lib/auth';
 const ALLOWED: Record<string, boolean> = {
   text: true, due: true, tag: true, done: true,
   priority: true, completed_at: true, is_archived: true, origin_hue: true,
+  // is_active is intentionally excluded — managed only by account/tag delete endpoints
 };
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -24,7 +25,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const db = await getDb();
   await db.execute({
-    sql: `UPDATE tasks SET ${cols.map(c => `${c} = ?`).join(', ')} WHERE user_id = ? AND id = ?`,
+    sql: `UPDATE tasks SET ${cols.map(c => `${c} = ?`).join(', ')} WHERE user_id = ? AND id = ? AND is_active = 1`,
     args,
   });
   return NextResponse.json({ ok: true });

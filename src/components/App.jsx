@@ -294,9 +294,77 @@ function DatePicker({ value, onPick, onClose }) {
   );
 }
 
-// ---------- Top bar ----------
-function TopBar({ theme, onToggleTheme, query, setQuery, view, setView, archiveCount, user, onLogout }) {
+// ---------- Avatar dropdown ----------
+function AvatarMenu({ menuRef, user, onLogout, onDelete }) {
+  const popRef = useRef(null);
+
+  useLayoutEffect(() => {
+    const el = popRef.current;
+    const trigger = menuRef.current;
+    if (!el || !trigger) return;
+    const tr = trigger.getBoundingClientRect();
+    const er = el.getBoundingClientRect();
+    const vw = window.innerWidth;
+    let left = tr.right - er.width;
+    if (left < 8) left = 8;
+    el.style.left = `${left}px`;
+    el.style.top  = `${tr.bottom + 6}px`;
+  }, [menuRef]);
+
   return (
+    <div className="avatar-menu" ref={popRef}>
+      <div className="avatar-menu-name">{user?.username}</div>
+      <button className="avatar-menu-item" onClick={onLogout}>Log out</button>
+      <button className="avatar-menu-item danger" onClick={onDelete}>Delete account</button>
+    </div>
+  );
+}
+
+// ---------- Delete-account confirmation modal ----------
+function DeleteConfirmModal({ username, onConfirm, onCancel }) {
+  return (
+    <div className="modal-overlay">
+      <div className="modal-box" role="dialog" aria-modal="true">
+        <div className="modal-title">Delete account?</div>
+        <p className="modal-body">
+          This permanently deletes <strong>{username}</strong> and all their tasks, tags, and settings. This cannot be undone.
+        </p>
+        <div className="modal-actions">
+          <button className="composer-btn ghost" onClick={onCancel}>Cancel</button>
+          <button className="composer-btn danger" onClick={onConfirm}>Delete account</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Top bar ----------
+function TopBar({ theme, onToggleTheme, query, setQuery, view, setView, archiveCount, user, onLogout, onDeleteAccount }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
+
+  const handleDelete = async () => {
+    await onDeleteAccount();
+    setConfirmDelete(false);
+  };
+
+  return (
+    <>
+    {confirmDelete && (
+      <DeleteConfirmModal
+        username={user?.username}
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmDelete(false)}
+      />
+    )}
     <header className="topbar">
       <div className="left-cluster">
         <div className="brand">
@@ -349,11 +417,17 @@ function TopBar({ theme, onToggleTheme, query, setQuery, view, setView, archiveC
           {theme === 'dark' ? <Icon.Moon /> : <Icon.Sun />}
           <span className="icon-btn-label">{theme === 'dark' ? 'Dark' : 'Light'}</span>
         </button>
-        <button className="avatar" onClick={onLogout} title={`Log out (${user?.username})`}>
-          <span>{user ? user.username.slice(0, 2).toUpperCase() : 'DN'}</span>
-        </button>
+        <div className="avatar-wrap" ref={menuRef}>
+          <button className="avatar" onClick={() => setMenuOpen(v => !v)}>
+            <span>{user ? user.username.slice(0, 2).toUpperCase() : 'DN'}</span>
+          </button>
+          {menuOpen && (
+            <AvatarMenu menuRef={menuRef} user={user} onLogout={() => { setMenuOpen(false); onLogout(); }} onDelete={() => { setMenuOpen(false); setConfirmDelete(true); }} />
+          )}
+        </div>
       </div>
     </header>
+    </>
   );
 }
 
@@ -469,7 +543,7 @@ function TaskRow({ task, colHue, tags, onToggle, onPatch, onAddTag, archiveView,
 function NewTaskComposer({ colKey, tags, onAdd, onAddTag, onCancel, noDueDate }) {
   const [text, setText] = useState('');
   const [tag, setTag] = useState(null);
-  const [due, setDue] = useState(noDueDate ? null : todayISO());
+  const [due, setDue] = useState(null);
   const [tagOpen, setTagOpen] = useState(false);
   const [dateOpen, setDateOpen] = useState(false);
   const inputRef = useRef(null);
@@ -808,6 +882,11 @@ export default function App() {
     setView('board');
   };
 
+  const handleDeleteAccount = async () => {
+    await api.deleteAccount();
+    handleLogout();
+  };
+
   // Sync theme to document
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
 
@@ -910,6 +989,7 @@ export default function App() {
         archiveCount={archive.length}
         user={user}
         onLogout={handleLogout}
+        onDeleteAccount={handleDeleteAccount}
       />
 
       {view === 'board' ? (

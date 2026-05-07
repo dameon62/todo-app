@@ -30,6 +30,7 @@ export const getTheme   = () => fetch(`${BASE}/settings/theme`, { headers: h() }
 export const setTheme   = (value)             => req('PUT',    `${BASE}/settings/theme`, { value });
 
 // Auth (no user header needed)
-export const getUsers   = ()                  => fetch(`${BASE}/auth/users`).then(j);
-export const login      = (username, password)=> req('POST',   `${BASE}/auth/login`,  { username, password });
-export const signup     = (username, password)=> req('POST',   `${BASE}/auth/signup`, { username, password });
+export const getUsers      = ()                   => fetch(`${BASE}/auth/users`).then(j);
+export const login         = (username, password) => req('POST',   `${BASE}/auth/login`,    { username, password });
+export const signup        = (username, password) => req('POST',   `${BASE}/auth/signup`,   { username, password });
+export const deleteAccount = ()                   => req('DELETE', `${BASE}/auth/account`);

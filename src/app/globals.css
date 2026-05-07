@@ -259,6 +259,78 @@ a { color: inherit; text-decoration: none; }
   box-shadow: inset 0 0 0 2px var(--bg);
   letter-spacing: 0.04em;
 }
+/* Avatar dropdown menu */
+.avatar-wrap { position: relative; }
+.avatar-menu {
+  position: fixed;
+  min-width: 160px;
+  background: var(--panel-hi);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
+  z-index: 1000;
+  animation: popIn .12s ease-out;
+}
+.avatar-menu-name {
+  padding: 6px 10px 8px;
+  font-size: 11px; font-weight: 600;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--line-soft);
+  margin-bottom: 4px;
+}
+.avatar-menu-item {
+  display: block; width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 13px; color: var(--ink);
+  font-family: var(--font-ui);
+  transition: background .12s;
+}
+.avatar-menu-item:hover { background: var(--panel-lo); }
+.avatar-menu-item.danger { color: var(--hue-red-ink); }
+.avatar-menu-item.danger:hover { background: var(--hue-red-soft); }
+
+/* Delete account confirmation modal */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: oklch(0 0 0 / 0.55);
+  display: grid; place-items: center;
+  z-index: 2000;
+  animation: fadeIn .15s ease-out;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.modal-box {
+  background: var(--panel-hi);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg);
+  padding: 28px 28px 24px;
+  max-width: 360px; width: calc(100vw - 48px);
+  animation: popIn .15s ease-out;
+}
+.modal-title {
+  font-size: 16px; font-weight: 700;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  margin-bottom: 10px;
+}
+.modal-body {
+  font-size: 13px; color: var(--ink-2);
+  line-height: 1.6;
+  margin-bottom: 22px;
+}
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.composer-btn.danger {
+  background: var(--hue-red-base);
+  color: oklch(0.98 0 0);
+  font-weight: 600;
+}
+.composer-btn.danger:hover { filter: brightness(1.1); }
+
 .login-btn {
   height: 34px; padding: 0 14px;
   background: var(--hue-blue-base);

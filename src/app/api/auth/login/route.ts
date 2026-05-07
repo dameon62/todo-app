@@ -5,7 +5,7 @@ export async function POST(req: NextRequest) {
   const { username, password } = await req.json();
   const db = await getDb();
   const result = await db.execute({
-    sql: 'SELECT id, username FROM users WHERE username = ? AND password = ?',
+    sql: 'SELECT id, username FROM users WHERE username = ? AND password = ? AND is_active = 1',
     args: [username, password],
   });
   if (!result.rows[0]) {
