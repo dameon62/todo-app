@@ -7,16 +7,22 @@ const db = createClient({
 
 let ready = false;
 
-// Add a column only if it doesn't already exist — uses PRAGMA to avoid
-// silent failures from try/catch swallowing real errors.
+// Add a column to an existing table if it isn't already there.
+// Strips NOT NULL from the ALTER TABLE statement — some libSQL versions
+// reject it even with a DEFAULT value. The constraint is kept in CREATE TABLE
+// for fresh databases.
+// Only ignores "duplicate column" errors; all other errors propagate so they
+// are visible in logs rather than silently swallowed.
 async function addColumnIfMissing(table: string, column: string, def: string) {
-  const info = await db.execute(`PRAGMA table_info(${table})`);
-  const exists = info.rows.some((r: any) => r.name === column);
-  if (!exists) {
-    // DROP NOT NULL from ALTER TABLE — SQLite doesn't enforce it for ADD COLUMN
-    // on existing rows. The constraint is retained in CREATE TABLE for fresh DBs.
-    const safeDef = def.replace('NOT NULL', '').replace(/\s+/g, ' ').trim();
-    await db.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${safeDef}`);
+  const safeDef = def.replace(/NOT NULL/gi, '').replace(/\s+/g, ' ').trim();
+  try {
+    await db.execute(`ALTER TABLE "${table}" ADD COLUMN "${column}" ${safeDef}`);
+  } catch (e: any) {
+    const msg = String(e?.message ?? e).toLowerCase();
+    if (!msg.includes('duplicate column') && !msg.includes('already exists')) {
+      throw e;
+    }
+    // column already present — nothing to do
   }
 }
 
