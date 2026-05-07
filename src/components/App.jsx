@@ -51,28 +51,34 @@ const fireAndForget = (p) => { p.catch(err => console.warn('mutation failed:', e
 const EMPTY_BOARD = { short: [], medium: [], long: [] };
 
 // Deterministic color from tag name — same name always gets the same color.
-// 30 entries: 10 hue families × 3 shades (dark / mid / light).
+// 24 entries: 12 hue families × 2 shades (bright / dark). Brown sits next to
+// orange (same hue band, lower chroma → desaturated warm); yellow sits between
+// amber and lime. Bright/dark pairing keeps the palette lively on both themes.
 const TAG_PALETTE = [
   // Red
-  'oklch(0.55 0.24 12)',  'oklch(0.64 0.22 17)',  'oklch(0.74 0.15 20)',
+  'oklch(0.70 0.20 18)',  'oklch(0.50 0.22 18)',
   // Orange
-  'oklch(0.58 0.22 38)',  'oklch(0.67 0.21 43)',  'oklch(0.76 0.14 48)',
-  // Amber
-  'oklch(0.62 0.19 68)',  'oklch(0.71 0.17 74)',  'oklch(0.79 0.12 80)',
+  'oklch(0.72 0.18 50)',  'oklch(0.56 0.18 48)',
+  // Brown — desaturated warm (caramel / chocolate)
+  'oklch(0.55 0.08 55)',  'oklch(0.38 0.07 50)',
+  // Amber / gold
+  'oklch(0.78 0.16 80)',  'oklch(0.55 0.16 75)',
+  // Yellow — lemon / mustard
+  'oklch(0.88 0.18 100)', 'oklch(0.68 0.15 95)',
   // Lime
-  'oklch(0.58 0.17 100)', 'oklch(0.67 0.16 108)', 'oklch(0.75 0.12 115)',
+  'oklch(0.80 0.18 120)', 'oklch(0.55 0.18 120)',
   // Green
-  'oklch(0.54 0.20 148)', 'oklch(0.63 0.18 144)', 'oklch(0.72 0.14 140)',
+  'oklch(0.72 0.18 145)', 'oklch(0.48 0.16 148)',
   // Teal
-  'oklch(0.56 0.18 188)', 'oklch(0.65 0.16 184)', 'oklch(0.74 0.11 178)',
+  'oklch(0.74 0.13 185)', 'oklch(0.50 0.13 188)',
   // Blue
-  'oklch(0.52 0.23 228)', 'oklch(0.62 0.21 222)', 'oklch(0.72 0.15 216)',
+  'oklch(0.70 0.16 220)', 'oklch(0.48 0.20 240)',
   // Indigo
-  'oklch(0.50 0.24 268)', 'oklch(0.60 0.22 264)', 'oklch(0.70 0.16 258)',
+  'oklch(0.68 0.17 265)', 'oklch(0.45 0.20 260)',
   // Purple
-  'oklch(0.52 0.24 298)', 'oklch(0.62 0.22 294)', 'oklch(0.72 0.16 289)',
+  'oklch(0.70 0.18 305)', 'oklch(0.48 0.22 298)',
   // Pink
-  'oklch(0.55 0.23 332)', 'oklch(0.65 0.21 328)', 'oklch(0.75 0.15 322)',
+  'oklch(0.72 0.18 335)', 'oklch(0.52 0.22 340)',
 ];
 function tagColor(name) {
   if (!name) return 'var(--ink-3)';
