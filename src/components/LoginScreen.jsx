@@ -47,7 +47,11 @@ export default function LoginScreen({ onLogin }) {
     const res = await api.signup(newUser.trim(), newPass.trim());
     setBusy(false);
     if (res.error) {
-      setError(res.error === 'Username taken' ? 'That username is already taken' : res.error);
+      setError(
+        res.error === 'Username taken'   ? 'That username is already taken' :
+        res.error === 'User limit reached' ? 'Max 3 users allowed'          :
+        res.error
+      );
       return;
     }
     onLogin(res);
@@ -79,11 +83,14 @@ export default function LoginScreen({ onLogin }) {
                 <span className="ls-name">{u.username}</span>
               </button>
             ))}
-            <button className="ls-tile ls-tile-new" onClick={() => { setError(null); setNewUser(''); setNewPass(''); setView('signup'); }}>
-              <div className="ls-avatar ls-avatar-new">+</div>
-              <span className="ls-name">New user</span>
-            </button>
+            {users.length < 3 && (
+              <button className="ls-tile ls-tile-new" onClick={() => { setError(null); setNewUser(''); setNewPass(''); setView('signup'); }}>
+                <div className="ls-avatar ls-avatar-new">+</div>
+                <span className="ls-name">New user</span>
+              </button>
+            )}
           </div>
+          {users.length >= 3 && <p className="ls-cap-note">Max 3 users reached</p>}
         </div>
       )}
 

@@ -8,6 +8,11 @@ export async function POST(req: NextRequest) {
   }
   const db = await getDb();
 
+  const countRes = await db.execute('SELECT COUNT(*) as c FROM users');
+  if (Number((countRes.rows[0] as any).c) >= 3) {
+    return NextResponse.json({ error: 'User limit reached' }, { status: 403 });
+  }
+
   const exists = await db.execute({
     sql: 'SELECT id FROM users WHERE username = ?',
     args: [username.trim()],

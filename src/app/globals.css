@@ -250,10 +250,14 @@ a { color: inherit; text-decoration: none; }
   width: 32px; height: 32px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--hue-blue-base), var(--hue-red-base));
-  color: white; font-weight: 600; font-size: 11px;
+  color: oklch(0.98 0 0) !important;
+  font-family: var(--font-ui);
+  font-weight: 700; font-size: 12px;
   display: grid; place-items: center;
+  cursor: pointer;
+  user-select: none;
   box-shadow: inset 0 0 0 2px var(--bg);
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
 }
 .login-btn {
   height: 34px; padding: 0 14px;
@@ -945,6 +949,11 @@ a { color: inherit; text-decoration: none; }
   font-size: 12px; color: var(--hue-red-ink);
   font-family: var(--font-mono); text-align: center;
 }
+.ls-cap-note {
+  font-size: 11px; color: var(--ink-3);
+  font-family: var(--font-mono); text-align: center;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
 
 /* Responsive */
 @media (max-width: 1280px) {
@@ -963,4 +972,39 @@ a { color: inherit; text-decoration: none; }
   .brand-sub { display: none; }
   .nav { display: none; }
   .search { display: none; }
+
+  /* Columns now stack top→bottom: green / yellow / blue.
+     Rotate the board wash to match — gradient runs 180deg (top→bottom).
+     Mask fades left→right so the colour hugs the left edge. */
+  .board::before {
+    background: linear-gradient(
+      180deg,
+      var(--hue-green-base)  0%,
+      var(--hue-green-base)  10%,
+      color-mix(in oklab, var(--hue-green-base) 50%, var(--hue-yellow-base) 50%) 40%,
+      var(--hue-yellow-base) 60%,
+      color-mix(in oklab, var(--hue-yellow-base) 50%, var(--hue-blue-base) 50%) 80%,
+      var(--hue-blue-base)   92%,
+      var(--hue-blue-base)   100%
+    );
+    -webkit-mask-image: linear-gradient(90deg, rgba(0,0,0,0.28) 0%, rgba(0,0,0,0.18) 35%, rgba(0,0,0,0.10) 65%, transparent 100%);
+            mask-image: linear-gradient(90deg, rgba(0,0,0,0.28) 0%, rgba(0,0,0,0.18) 35%, rgba(0,0,0,0.10) 65%, transparent 100%);
+  }
+
+  /* Accent stripe flips from horizontal-top to vertical-left */
+  .board::after {
+    left: 14px; right: auto;
+    top: 14px;  bottom: 14px;
+    width: 3px; height: auto;
+    background: linear-gradient(
+      180deg,
+      var(--hue-green-base)  0%,
+      var(--hue-green-base)  10%,
+      color-mix(in oklab, var(--hue-green-base) 50%, var(--hue-yellow-base) 50%) 40%,
+      var(--hue-yellow-base) 60%,
+      color-mix(in oklab, var(--hue-yellow-base) 50%, var(--hue-blue-base) 50%) 80%,
+      var(--hue-blue-base)   92%,
+      var(--hue-blue-base)   100%
+    );
+  }
 }
