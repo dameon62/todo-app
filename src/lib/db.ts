@@ -14,13 +14,20 @@ let ready = false;
 // Only ignores "duplicate column" errors; all other errors propagate so they
 // are visible in logs rather than silently swallowed.
 async function addColumnIfMissing(table: string, column: string, def: string) {
-  const safeDef = def.replace(/NOT NULL/gi, '').replace(/\s+/g, ' ').trim();
+  // ALTER TABLE ADD COLUMN in Turso/libSQL has two restrictions vs CREATE TABLE:
+  //   1. NOT NULL requires a *constant* default — strip it (existing rows use the DEFAULT value)
+  //   2. Expression defaults like DEFAULT (strftime(...)) are non-constant → replace with NULL
+  const safeDef = def
+    .replace(/NOT NULL/gi, '')
+    .replace(/DEFAULT\s*\([^)]*\)/gi, 'DEFAULT NULL')
+    .replace(/\s+/g, ' ')
+    .trim();
   try {
     await db.execute(`ALTER TABLE "${table}" ADD COLUMN "${column}" ${safeDef}`);
   } catch (e: any) {
     const msg = String(e?.message ?? e).toLowerCase();
     if (!msg.includes('duplicate column') && !msg.includes('already exists')) {
-      throw e;
+      throw e; // real error — let it surface in logs
     }
     // column already present — nothing to do
   }
