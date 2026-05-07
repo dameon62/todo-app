@@ -1,0 +1,895 @@
+'use client';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import * as api from '@/lib/api.js';
+import LoginScreen from '@/components/LoginScreen.jsx';
+
+// ---------- Helpers ----------
+const DAY = 24 * 60 * 60 * 1000;
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const addDays = (base, d) => {
+  const n = new Date(base);
+  n.setDate(n.getDate() + d);
+  return n.toISOString().slice(0, 10);
+};
+const fmtDue = (iso) => {
+  if (!iso) return 'No date';
+  const d = new Date(iso + 'T12:00:00');
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const target = new Date(d); target.setHours(0, 0, 0, 0);
+  const diff = Math.round((target - now) / DAY);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Tomorrow';
+  if (diff === -1) return 'Yesterday';
+  if (diff > 1 && diff < 7) return d.toLocaleDateString(undefined, { weekday: 'long' });
+  if (diff >= 7 && diff < 14) return 'Next week';
+  if (diff >= 14 && diff < 31) return `In ${Math.round(diff / 7)} wks`;
+  if (diff < 0) return `${Math.abs(diff)}d overdue`;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+};
+const isOverdue = (iso) => iso && new Date(iso + 'T23:59:59') < new Date();
+
+const EMPTY_BOARD = { short: [], medium: [], long: [] };
+
+const COLUMNS = [
+  { key: 'short',  title: 'Short term',  subtitle: 'This month',   flex: 50, hue: 'green', noDueDate: false, split: true },
+  { key: 'medium', title: 'Medium term', subtitle: 'This quarter', flex: 30, hue: 'yellow', noDueDate: false },
+  { key: 'long',   title: 'Long term',   subtitle: 'This year',    flex: 20, hue: 'blue', noDueDate: true },
+];
+
+
+// ---------- Icons ----------
+const Icon = {
+  Check: (p) => (
+    <svg viewBox="0 0 14 14" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M2.5 7.2l3 2.8 6-6.4" />
+    </svg>
+  ),
+  Plus: (p) => (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" {...p}>
+      <path d="M8 3v10M3 8h10" />
+    </svg>
+  ),
+  Search: (p) => (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" {...p}>
+      <circle cx="7" cy="7" r="4.5" />
+      <path d="M10.5 10.5L14 14" />
+    </svg>
+  ),
+  Sun: (p) => (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" {...p}>
+      <circle cx="8" cy="8" r="3" />
+      <path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3.2 3.2l1 1M11.8 11.8l1 1M3.2 12.8l1-1M11.8 4.2l1-1" />
+    </svg>
+  ),
+  Moon: (p) => (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M13 10a5.5 5.5 0 01-7-7 5.5 5.5 0 107 7z" />
+    </svg>
+  ),
+  Archive: (p) => (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <rect x="2" y="3" width="12" height="3" rx="0.8" />
+      <path d="M3 6v7h10V6M6.5 9h3" />
+    </svg>
+  ),
+  Tag: (p) => (
+    <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M8 2H3v5l7 7 5-5-7-7z" />
+      <circle cx="5.5" cy="4.5" r="0.7" fill="currentColor" />
+    </svg>
+  ),
+  Calendar: (p) => (
+    <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <rect x="2" y="3.5" width="12" height="11" rx="1.5" />
+      <path d="M2 6.5h12M5.5 2v2.5M10.5 2v2.5" />
+    </svg>
+  ),
+  X: (p) => (
+    <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" {...p}>
+      <path d="M4 4l8 8M12 4l-8 8" />
+    </svg>
+  ),
+  ChevronLeft: (p) => (
+    <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M10 3L5 8l5 5" />
+    </svg>
+  ),
+  ChevronRight: (p) => (
+    <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M6 3l5 5-5 5" />
+    </svg>
+  ),
+};
+
+// ---------- Popover (click-outside + ESC) ----------
+function usePopover(onClose) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  // Clamp to viewport on every open — checks all 4 edges
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const m = 8; // minimum margin from viewport edge
+
+    // Horizontal: if overflows right, anchor to right edge of trigger instead
+    if (r.right > vw - m) {
+      el.style.left = 'auto';
+      el.style.right = '0';
+    }
+    // Horizontal: if somehow overflows left, push right
+    if (r.left < m) {
+      el.style.left = `${m}px`;
+    }
+    // Vertical: if overflows bottom, flip above trigger
+    if (r.bottom > vh - m) {
+      el.style.top = 'auto';
+      el.style.bottom = 'calc(100% + 6px)';
+    }
+    // Vertical: if overflows top (e.g. flipped on tiny screen), clamp
+    if (r.top < m) {
+      el.style.top = `${m}px`;
+      el.style.bottom = 'auto';
+    }
+  }, []);
+
+  return ref;
+}
+
+// ---------- Tag picker ----------
+function TagPicker({ value, tags, onPick, onAddTag, onClose }) {
+  const ref = usePopover(onClose);
+  const [q, setQ] = useState('');
+  const filtered = tags.filter((t) => t.toLowerCase().includes(q.toLowerCase()));
+  const canCreate = q.trim() && !tags.find((t) => t.toLowerCase() === q.trim().toLowerCase());
+  return (
+    <div className="pop" ref={ref} role="dialog">
+      <div className="pop-search">
+        <Icon.Tag />
+        <input autoFocus placeholder="Find or add tag…" value={q} onChange={(e) => setQ(e.target.value)} />
+      </div>
+      <div className="pop-list">
+        {filtered.map((t) => (
+          <button key={t} className={`pop-item ${t === value ? 'on' : ''}`} onClick={() => { onPick(t); onClose(); }}>
+            <span className="tag-dot" style={{ background: `var(--tag-${t.toLowerCase()}, oklch(0.72 0.1 200))` }} />
+            <span>{t}</span>
+            {t === value && <span className="pop-check"><Icon.Check /></span>}
+          </button>
+        ))}
+        {canCreate && (
+          <button className="pop-item create" onClick={() => { onAddTag(q.trim()); onPick(q.trim()); onClose(); }}>
+            <Icon.Plus /> <span>Create "{q.trim()}"</span>
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Date picker (calendar) ----------
+function DatePicker({ value, onPick, onClose }) {
+  const ref = usePopover(onClose);
+  const todayStr = todayISO();
+  const init = value ? new Date(value + 'T12:00:00') : new Date();
+  const [viewYear, setViewYear] = useState(init.getFullYear());
+  const [viewMonth, setViewMonth] = useState(init.getMonth());
+
+  const goBack = () => {
+    if (viewMonth === 0) { setViewYear(viewYear - 1); setViewMonth(11); }
+    else setViewMonth(viewMonth - 1);
+  };
+  const goForward = () => {
+    if (viewMonth === 11) { setViewYear(viewYear + 1); setViewMonth(0); }
+    else setViewMonth(viewMonth + 1);
+  };
+
+  const monthLabel = new Date(viewYear, viewMonth, 1)
+    .toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  const firstDow = new Date(viewYear, viewMonth, 1).getDay();
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+
+  const toISO = (d) =>
+    `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+
+  return (
+    <div className="pop cal-pop" ref={ref} role="dialog">
+      <div className="cal-nav-row">
+        <button className="cal-nav-btn" onClick={goBack} aria-label="Previous month">
+          <Icon.ChevronLeft />
+        </button>
+        <span className="cal-month-label">{monthLabel}</span>
+        <button className="cal-nav-btn" onClick={goForward} aria-label="Next month">
+          <Icon.ChevronRight />
+        </button>
+      </div>
+      <div className="cal-grid">
+        {['Su','Mo','Tu','We','Th','Fr','Sa'].map(d => (
+          <span key={d} className="cal-dow">{d}</span>
+        ))}
+        {Array.from({ length: firstDow }, (_, i) => <span key={`p${i}`} />)}
+        {Array.from({ length: daysInMonth }, (_, i) => {
+          const d = i + 1;
+          const iso = toISO(d);
+          return (
+            <button
+              key={iso}
+              className={`cal-day${iso === value ? ' selected' : ''}${iso === todayStr ? ' today' : ''}`}
+              onClick={() => { onPick(iso); onClose(); }}
+            >
+              {d}
+            </button>
+          );
+        })}
+      </div>
+      {value && (
+        <button className="pop-clear" onClick={() => { onPick(null); onClose(); }}>
+          <Icon.X /> Clear due date
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ---------- Top bar ----------
+function TopBar({ theme, onToggleTheme, query, setQuery, view, setView, archiveCount, user, onLogout }) {
+  return (
+    <header className="topbar">
+      <div className="left-cluster">
+        <div className="brand">
+          <div className="brand-mark" aria-hidden>
+            <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2.5" y="3.5" width="13" height="3" rx="1" />
+              <rect x="2.5" y="8.5" width="13" height="3" rx="1" />
+              <rect x="2.5" y="13.5" width="8" height="3" rx="1" />
+              <path d="M17 6l1 1 2-2.2M17 11l1 1 2-2.2M13 16l1 1 2-2.2" />
+            </svg>
+          </div>
+          <div className="brand-text">
+            <div className="brand-name">DameonNotes</div>
+            <div className="brand-sub">a todo journal</div>
+          </div>
+        </div>
+
+        <nav className="nav">
+          <button className={`nav-link ${view === 'board' ? 'active' : ''}`} onClick={() => setView('board')}>Home</button>
+          <button className={`nav-link ${view === 'archive' ? 'active' : ''}`} onClick={() => setView('archive')}>
+            <Icon.Archive /> <span>Archive</span>
+            {archiveCount > 0 && <span className="nav-count">{archiveCount}</span>}
+          </button>
+          <button className={`nav-link ${view === 'tags' ? 'active' : ''}`} onClick={() => setView('tags')}>
+            <Icon.Tag /> <span>Tags</span>
+          </button>
+        </nav>
+
+        <div className="search">
+          <Icon.Search />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search tasks, tags…" />
+          <kbd>⌘K</kbd>
+        </div>
+      </div>
+
+      <div className="quote" aria-label="House motto">
+        <span className="quote-mark" aria-hidden>[</span>
+        <span className="quote-word w-d">Discipline</span>
+        <span className="quote-sep" aria-hidden>/</span>
+        <span className="quote-word w-de">Decisive</span>
+        <span className="quote-sep" aria-hidden>/</span>
+        <span className="quote-word w-dd">Dedication</span>
+        <span className="quote-sep" aria-hidden>/</span>
+        <span className="quote-word w-e">Exploration</span>
+        <span className="quote-mark" aria-hidden>]</span>
+      </div>
+
+      <div className="top-actions">
+        <button className="icon-btn theme-btn" onClick={onToggleTheme} title="Toggle theme">
+          {theme === 'dark' ? <Icon.Moon /> : <Icon.Sun />}
+          <span className="icon-btn-label">{theme === 'dark' ? 'Dark' : 'Light'}</span>
+        </button>
+        <button className="avatar" onClick={onLogout} title={`Log out (${user?.username})`}>
+          <span>{user ? user.username.slice(0, 2).toUpperCase() : 'DN'}</span>
+        </button>
+      </div>
+    </header>
+  );
+}
+
+// ---------- Task row ----------
+function TaskRow({ task, colHue, tags, onToggle, onPatch, onAddTag, archiveView, hideDate }) {
+  const [tagOpen, setTagOpen] = useState(false);
+  const [dateOpen, setDateOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(task.text);
+
+  const overdue = !task.done && isOverdue(task.due);
+  const readOnly = !!archiveView;
+
+  const saveText = () => {
+    const v = draft.trim();
+    if (v && v !== task.text) onPatch(task.id, { text: v });
+    else setDraft(task.text);
+    setEditing(false);
+  };
+
+  return (
+    <li className={`task ${task.done ? 'is-done' : ''} ${overdue ? 'is-overdue' : ''} ${readOnly ? 'read-only' : ''}`} data-hue={colHue}>
+      <button
+        className={`check ${task.done ? 'on' : ''}`}
+        onClick={() => { if (!task.done) onToggle(task.id); }}
+        disabled={task.done}
+        aria-label="Mark complete"
+      >
+        <Icon.Check className="check-icon" />
+      </button>
+
+      <div className="task-body">
+        {editing && !readOnly && !task.done ? (
+          <input
+            autoFocus
+            className="task-text-input"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={saveText}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') saveText();
+              if (e.key === 'Escape') { setDraft(task.text); setEditing(false); }
+            }}
+          />
+        ) : (
+          <div
+            className="task-text"
+            onClick={() => { if (!readOnly && !task.done) { setDraft(task.text); setEditing(true); } }}
+            title={readOnly || task.done ? '' : 'Click to edit'}
+          >
+            {task.text}
+          </div>
+        )}
+        <div className="task-meta">
+          <div className="meta-chip-wrap">
+            <button
+              className="meta-chip tag-chip"
+              disabled={readOnly}
+              onClick={(e) => { if (readOnly) return; e.stopPropagation(); setTagOpen((v) => !v); setDateOpen(false); }}
+            >
+              <span className="tag-dot" style={{ background: `var(--tag-${(task.tag || '').toLowerCase()}, var(--ink-3))` }} />
+              <span>{task.tag || 'No tag'}</span>
+            </button>
+            {tagOpen && !readOnly && (
+              <TagPicker
+                value={task.tag}
+                tags={tags}
+                onPick={(t) => onPatch(task.id, { tag: t })}
+                onAddTag={onAddTag}
+                onClose={() => setTagOpen(false)}
+              />
+            )}
+          </div>
+
+          <span className="dot-sep">·</span>
+
+          {!hideDate && (
+            <div className="meta-chip-wrap">
+              <button
+                className={`meta-chip date-chip ${overdue ? 'overdue' : ''}`}
+                disabled={readOnly}
+                onClick={(e) => { if (readOnly) return; e.stopPropagation(); setDateOpen((v) => !v); setTagOpen(false); }}
+              >
+                <Icon.Calendar />
+                <span>{fmtDue(task.due)}</span>
+              </button>
+              {dateOpen && !readOnly && (
+                <DatePicker
+                  value={task.due}
+                  onPick={(iso) => onPatch(task.id, { due: iso })}
+                  onClose={() => setDateOpen(false)}
+                />
+              )}
+            </div>
+          )}
+
+          {archiveView && task.completedAt && (
+            <>
+              <span className="dot-sep">·</span>
+              <span className="archived-ago">
+                archived {Math.round((Date.now() - task.completedAt) / DAY)}d ago
+              </span>
+            </>
+          )}
+        </div>
+      </div>
+    </li>
+  );
+}
+
+// ---------- Inline new-task composer ----------
+function NewTaskComposer({ colKey, tags, onAdd, onAddTag, onCancel, noDueDate }) {
+  const [text, setText] = useState('');
+  const [tag, setTag] = useState(null);
+  const [due, setDue] = useState(noDueDate ? null : todayISO());
+  const [tagOpen, setTagOpen] = useState(false);
+  const [dateOpen, setDateOpen] = useState(false);
+  const inputRef = useRef(null);
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const submit = () => {
+    const t = text.trim();
+    if (!t) { onCancel(); return; }
+    onAdd(colKey, { text: t, tag, due: noDueDate ? null : due });
+    onCancel();
+  };
+
+  return (
+    <div className="composer">
+      <div className="composer-row">
+        <div className="check" />
+        <input
+          ref={inputRef}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit();
+            if (e.key === 'Escape') onCancel();
+          }}
+          placeholder="What needs doing?"
+        />
+      </div>
+      <div className="composer-meta">
+        <div className="composer-chips">
+          <div className="meta-chip-wrap">
+            <button className="meta-chip tag-chip" onClick={() => { setTagOpen((v) => !v); setDateOpen(false); }}>
+              <span className="tag-dot" style={{ background: `var(--tag-${(tag || '').toLowerCase()}, var(--ink-3))` }} />
+              <span>{tag || 'Tag'}</span>
+            </button>
+            {tagOpen && <TagPicker value={tag} tags={tags} onPick={setTag} onAddTag={onAddTag} onClose={() => setTagOpen(false)} />}
+          </div>
+          {!noDueDate && (
+            <div className="meta-chip-wrap">
+              <button className="meta-chip date-chip" onClick={() => { setDateOpen((v) => !v); setTagOpen(false); }}>
+                <Icon.Calendar />
+                <span>{fmtDue(due)}</span>
+              </button>
+              {dateOpen && <DatePicker value={due} onPick={setDue} onClose={() => setDateOpen(false)} />}
+            </div>
+          )}
+        </div>
+        <div className="composer-actions">
+          <button className="composer-btn ghost" onClick={onCancel}>Cancel</button>
+          <button className="composer-btn primary" onClick={submit} disabled={!text.trim()}>Add task</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Column ----------
+function Column({ col, tasks, hoveredKey, setHoveredKey, tags, onToggle, onPatch, onAdd, onAddTag, popStrength }) {
+  const [adding, setAdding] = useState(false);
+
+  const open = hoveredKey === col.key;
+  const dimmed = hoveredKey && hoveredKey !== col.key;
+
+  const remaining = tasks.filter((t) => !t.done).length;
+  const total = tasks.length;
+
+  const baseGrow = col.flex;
+  const hoverBoost = open ? baseGrow * (popStrength / 100) : 0;
+  const grow = baseGrow + hoverBoost;
+
+  const split = col.split;
+  let groupA = [], groupB = [];
+  if (split) {
+    tasks.forEach((t, i) => {
+      if (i % 2 === 0) groupA.push(t);
+      else groupB.push(t);
+    });
+  }
+
+  const renderTaskList = (list) => (
+    <ul className="tasks">
+      {list.map((t) => (
+        <TaskRow
+          key={t.id}
+          task={t}
+          colHue={col.hue}
+          tags={tags}
+          onToggle={onToggle}
+          onPatch={onPatch}
+          onAddTag={onAddTag}
+          hideDate={col.noDueDate}
+        />
+      ))}
+      {list.length === 0 && (
+        <li className="empty">&nbsp;</li>
+      )}
+    </ul>
+  );
+
+  return (
+    <section
+      className={`col ${open ? 'is-open' : ''} ${dimmed ? 'is-dim' : ''} ${split ? 'has-split' : ''}`}
+      data-hue={col.hue}
+      style={{ flexGrow: grow, flexBasis: 0 }}
+      onMouseEnter={() => setHoveredKey(col.key)}
+      onMouseLeave={() => setHoveredKey(null)}
+    >
+      <div className="col-inner">
+        <header className="col-head">
+          <div className="col-head-main">
+            <div className="col-title-row">
+              <span className="col-dot" />
+              <h2 className="col-title">{col.title}</h2>
+            </div>
+            <div className="col-sub">{col.subtitle}</div>
+          </div>
+          {!col.noDueDate && (
+            <div className="col-stat">
+              <div className="col-stat-num">{remaining}</div>
+              <div className="col-stat-label">of {total} open</div>
+            </div>
+          )}
+        </header>
+
+        {split ? (
+          <div className="col-split">
+            <div className="col-sub-pane">{renderTaskList(groupA)}</div>
+            <div className="col-sub-pane">{renderTaskList(groupB)}</div>
+          </div>
+        ) : (
+          renderTaskList(tasks)
+        )}
+
+        {adding ? (
+          <NewTaskComposer
+            colKey={col.key}
+            tags={tags}
+            onAdd={onAdd}
+            onAddTag={onAddTag}
+            onCancel={() => setAdding(false)}
+            noDueDate={col.noDueDate}
+          />
+        ) : (
+          <button className="add-row" onClick={() => setAdding(true)}>
+            <span className="plus"><Icon.Plus /></span>
+            <span>Add a {col.title.toLowerCase()} task</span>
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ---------- Tags view ----------
+function TagsView({ tags, board, onAddTag, onRenameTag, onDeleteTag }) {
+  const [newTag, setNewTag] = useState('');
+  const counts = useMemo(() => {
+    const c = {};
+    for (const k of Object.keys(board)) for (const t of board[k]) if (t.tag) c[t.tag] = (c[t.tag] || 0) + 1;
+    return c;
+  }, [board]);
+  const submit = () => {
+    const v = newTag.trim();
+    if (!v) return;
+    onAddTag(v);
+    setNewTag('');
+  };
+  return (
+    <div className="archive">
+      <div className="archive-inner">
+        <div className="archive-head">
+          <div>
+            <h2 className="archive-title"><Icon.Tag /> Tags</h2>
+            <div className="archive-sub">Create, rename and remove tags. Task counts update live.</div>
+          </div>
+        </div>
+        <div className="tag-add">
+          <input
+            value={newTag}
+            onChange={(e) => setNewTag(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+            placeholder="New tag name…"
+          />
+          <button className="composer-btn primary" onClick={submit} disabled={!newTag.trim()}>
+            <Icon.Plus /> Add tag
+          </button>
+        </div>
+        <ul className="tag-list">
+          {tags.map((t) => (
+            <TagItem key={t} name={t} count={counts[t] || 0} onRename={(n) => onRenameTag(t, n)} onDelete={() => onDeleteTag(t)} />
+          ))}
+          {tags.length === 0 && <li className="empty">No tags yet. Add one above.</li>}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function TagItem({ name, count, onRename, onDelete }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(name);
+  const save = () => {
+    const v = draft.trim();
+    if (v && v !== name) onRename(v);
+    setEditing(false);
+  };
+  return (
+    <li className="tag-item">
+      <span className="tag-dot" style={{ background: `var(--tag-${name.toLowerCase()}, var(--ink-3))` }} />
+      {editing ? (
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={save}
+          onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { setDraft(name); setEditing(false); } }}
+          className="tag-item-input"
+        />
+      ) : (
+        <span className="tag-item-name" onClick={() => { setDraft(name); setEditing(true); }}>{name}</span>
+      )}
+      <span className="tag-item-count">{count} {count === 1 ? 'task' : 'tasks'}</span>
+      <button className="tag-item-del" onClick={onDelete} title="Delete tag"><Icon.X /></button>
+    </li>
+  );
+}
+
+// ---------- Archive view ----------
+function ArchiveView({ archived }) {
+  return (
+    <div className="archive">
+      <div className="archive-inner">
+        <div className="archive-head">
+          <div>
+            <h2 className="archive-title">
+              <Icon.Archive /> Archive
+            </h2>
+            <div className="archive-sub">Completed tasks older than 30 days — auto-archived, read-only</div>
+          </div>
+        </div>
+        {archived.length === 0 ? (
+          <div className="archive-empty">
+            <div className="archive-empty-icon"><Icon.Archive /></div>
+            <div>Nothing archived yet.</div>
+            <div className="archive-empty-hint">Tasks you complete are automatically archived 30 days later.</div>
+          </div>
+        ) : (
+          <ul className="tasks archive-list">
+            {archived.map((t) => (
+              <TaskRow
+                key={t.id}
+                task={t}
+                colHue={t._origin}
+                archiveView
+              />
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const POP_STRENGTH = 35;
+
+// ---------- App ----------
+export default function App() {
+  const [user, setUser]       = useState(null); // { id, username }
+  const [theme, setTheme]     = useState('dark');
+  const [board, setBoard]     = useState(EMPTY_BOARD);
+  const [archive, setArchive] = useState([]);
+  const [tags, setTags]       = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const [hoveredKey, setHoveredKey] = useState(null);
+  const [query, setQuery]           = useState('');
+  const [view, setView]             = useState('board');
+
+  // Check for persisted session, then load data
+  useEffect(() => {
+    let cancelled = false;
+    const init = async () => {
+      try {
+        const raw = localStorage.getItem('dameon_session');
+        if (raw) {
+          const session = JSON.parse(raw);
+          api.setUserId(session.id);
+          const [boardData, archiveData, tagsData, themeData] = await Promise.all([
+            api.getBoard(), api.getArchive(), api.getTags(), api.getTheme(),
+          ]);
+          if (cancelled) return;
+          setBoard(boardData);
+          setArchive(archiveData);
+          setTags(tagsData);
+          if (themeData) setTheme(themeData);
+          setUser(session);
+        }
+      } catch {
+        localStorage.removeItem('dameon_session');
+        api.clearUserId();
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    init();
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleLogin = async (userData) => {
+    api.setUserId(userData.id);
+    localStorage.setItem('dameon_session', JSON.stringify(userData));
+    const [boardData, archiveData, tagsData, themeData] = await Promise.all([
+      api.getBoard(), api.getArchive(), api.getTags(), api.getTheme(),
+    ]);
+    setBoard(boardData);
+    setArchive(archiveData);
+    setTags(tagsData);
+    if (themeData) setTheme(themeData);
+    setUser(userData);
+    setView('board');
+  };
+
+  const handleLogout = () => {
+    api.clearUserId();
+    localStorage.removeItem('dameon_session');
+    setUser(null);
+    setBoard(EMPTY_BOARD);
+    setArchive([]);
+    setTags([]);
+    setTheme('dark');
+    setView('board');
+  };
+
+  // Sync theme to document
+  useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
+
+  const toggleTheme = () => setTheme((t) => {
+    const next = t === 'dark' ? 'light' : 'dark';
+    api.setTheme(next);
+    return next;
+  });
+
+  const onToggle = (id) => {
+    const now = Date.now();
+    setBoard((prev) => {
+      const next = { ...prev };
+      for (const k of Object.keys(next)) {
+        next[k] = next[k].map((t) =>
+          t.id === id && !t.done ? { ...t, done: true, completedAt: now } : t
+        );
+      }
+      return next;
+    });
+    api.patchTask(id, { done: 1, completed_at: now });
+  };
+
+  const onPatch = (id, patch) => {
+    setBoard((prev) => {
+      const next = { ...prev };
+      for (const k of Object.keys(next)) next[k] = next[k].map((t) => (t.id === id ? { ...t, ...patch } : t));
+      return next;
+    });
+    setArchive((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+    api.patchTask(id, patch);
+  };
+
+  const onAdd = (colKey, { text, tag, due }) => {
+    const id = `${colKey}-${Date.now()}`;
+    setBoard((prev) => ({
+      ...prev,
+      [colKey]: [
+        { id, text, tag, due, done: false, priority: 'med', completedAt: null },
+        ...prev[colKey],
+      ],
+    }));
+    api.createTask({ id, col_key: colKey, text, tag, due, priority: 'med' });
+  };
+
+  const onAddTag = (t) => {
+    setTags((prev) => (prev.includes(t) ? prev : [...prev, t]));
+    api.addTag(t);
+  };
+
+  const onRenameTag = (oldName, newName) => {
+    setTags((prev) => prev.map((t) => (t === oldName ? newName : t)));
+    setBoard((prev) => {
+      const next = { ...prev };
+      for (const k of Object.keys(next)) next[k] = next[k].map((t) => (t.tag === oldName ? { ...t, tag: newName } : t));
+      return next;
+    });
+    api.renameTag(oldName, newName);
+  };
+
+  const onDeleteTag = (name) => {
+    setTags((prev) => prev.filter((t) => t !== name));
+    setBoard((prev) => {
+      const next = { ...prev };
+      for (const k of Object.keys(next)) next[k] = next[k].map((t) => (t.tag === name ? { ...t, tag: null } : t));
+      return next;
+    });
+    api.deleteTag(name);
+  };
+
+  const filterAndSort = (list) => {
+    const q = query.trim().toLowerCase();
+    let out = q ? list.filter((t) => t.text.toLowerCase().includes(q) || (t.tag || '').toLowerCase().includes(q)) : list;
+    out = [...out].sort((a, b) => (a.due || '9999-12-31').localeCompare(b.due || '9999-12-31'));
+    out = [...out].sort((a, b) => Number(a.done) - Number(b.done));
+    return out;
+  };
+
+  const totalOpen = Object.values(board).flat().filter((t) => !t.done).length;
+  const totalDone = Object.values(board).flat().filter((t) => t.done).length;
+
+  if (loading) {
+    return (
+      <div className="app" style={{ display: 'grid', placeItems: 'center', height: '100vh' }}>
+        <span style={{ color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', fontSize: 13 }}>Loading…</span>
+      </div>
+    );
+  }
+
+  if (!user) return <LoginScreen onLogin={handleLogin} />;
+
+  return (
+    <div className="app">
+      <TopBar
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        query={query}
+        setQuery={setQuery}
+        view={view}
+        setView={setView}
+        archiveCount={archive.length}
+        user={user}
+        onLogout={handleLogout}
+      />
+
+      {view === 'board' ? (
+        <main className={`board ${hoveredKey ? 'has-hover' : ''}`} onMouseLeave={() => setHoveredKey(null)}>
+          {COLUMNS.map((col) => (
+            <React.Fragment key={col.key}>
+              <Column
+                col={col}
+                tasks={filterAndSort(board[col.key])}
+                hoveredKey={hoveredKey}
+                setHoveredKey={setHoveredKey}
+                tags={tags}
+                onToggle={onToggle}
+                onPatch={onPatch}
+                onAdd={onAdd}
+                onAddTag={onAddTag}
+                popStrength={POP_STRENGTH}
+              />
+            </React.Fragment>
+          ))}
+        </main>
+      ) : view === 'archive' ? (
+        <ArchiveView archived={archive} />
+      ) : (
+        <TagsView tags={tags} board={board} onAddTag={onAddTag} onRenameTag={onRenameTag} onDeleteTag={onDeleteTag} />
+      )}
+
+      <footer className="statusbar">
+        <span>{totalOpen} open</span>
+        <span className="dot-sep">·</span>
+        <span>{totalDone} done</span>
+        <span className="dot-sep">·</span>
+        <span>{archive.length} archived</span>
+        <span className="spacer" />
+        <span>⌘N new · ⌘K search · Space complete</span>
+      </footer>
+
+    </div>
+  );
+}
