@@ -7,21 +7,26 @@ const db = createClient({
 
 let ready = false;
 
-// Safe ALTER TABLE — silently skips if column already exists
-async function addColumn(table: string, column: string, def: string) {
-  try {
-    await db.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${def}`);
-  } catch {
-    // column already exists
+// Add a column only if it doesn't already exist — uses PRAGMA to avoid
+// silent failures from try/catch swallowing real errors.
+async function addColumnIfMissing(table: string, column: string, def: string) {
+  const info = await db.execute(`PRAGMA table_info(${table})`);
+  const exists = info.rows.some((r: any) => r.name === column);
+  if (!exists) {
+    // DROP NOT NULL from ALTER TABLE — SQLite doesn't enforce it for ADD COLUMN
+    // on existing rows. The constraint is retained in CREATE TABLE for fresh DBs.
+    const safeDef = def.replace('NOT NULL', '').replace(/\s+/g, ' ').trim();
+    await db.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${safeDef}`);
   }
 }
 
-const TS_DEF = `TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))`;
+const TS_DEF  = `TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))`;
+const ACT_DEF = `INTEGER NOT NULL DEFAULT 1`;
 
 export async function getDb() {
   if (ready) return db;
 
-  // Detect v1 schema (no users table) and migrate by dropping old tables
+  // Detect v1 schema (no users table) → drop old tables so CREATE TABLE runs fresh
   const hasUsers = await db.execute(
     `SELECT name FROM sqlite_master WHERE type='table' AND name='users'`
   );
@@ -74,7 +79,17 @@ export async function getDb() {
     );
   `);
 
-  // Indexes — created after tables so IF NOT EXISTS is always safe
+  // Column migrations — MUST run before indexes that reference these columns
+  await addColumnIfMissing('users',    'created_on', TS_DEF);
+  await addColumnIfMissing('tasks',    'created_on', TS_DEF);
+  await addColumnIfMissing('tags',     'created_on', TS_DEF);
+  await addColumnIfMissing('settings', 'created_on', TS_DEF);
+  await addColumnIfMissing('users',    'is_active',  ACT_DEF);
+  await addColumnIfMissing('tasks',    'is_active',  ACT_DEF);
+  await addColumnIfMissing('tags',     'is_active',  ACT_DEF);
+  await addColumnIfMissing('settings', 'is_active',  ACT_DEF);
+
+  // Indexes — created after column migrations so referenced columns are guaranteed present
   await db.executeMultiple(`
     CREATE INDEX IF NOT EXISTS idx_tasks_board
       ON tasks(user_id, is_active, is_archived, created_at);
@@ -92,18 +107,7 @@ export async function getDb() {
       ON users(is_active, username);
   `);
 
-  // Migrate existing tables that predate created_on / is_active
-  await addColumn('users',    'created_on', TS_DEF);
-  await addColumn('tasks',    'created_on', TS_DEF);
-  await addColumn('tags',     'created_on', TS_DEF);
-  await addColumn('settings', 'created_on', TS_DEF);
-  const ACT_DEF = 'INTEGER NOT NULL DEFAULT 1';
-  await addColumn('users',    'is_active', ACT_DEF);
-  await addColumn('tasks',    'is_active', ACT_DEF);
-  await addColumn('tags',     'is_active', ACT_DEF);
-  await addColumn('settings', 'is_active', ACT_DEF);
-
-  // One-time migration: delete pre-seeded default tags
+  // One-time data migrations
   await db.executeMultiple(`
     CREATE TABLE IF NOT EXISTS _migrations (
       name       TEXT PRIMARY KEY,
