@@ -19,7 +19,7 @@ async function addColumnIfMissing(table: string, column: string, def: string) {
   //   2. Expression defaults like DEFAULT (strftime(...)) are non-constant → replace with NULL
   const safeDef = def
     .replace(/NOT NULL/gi, '')
-    .replace(/DEFAULT\s*\([^)]*\)/gi, 'DEFAULT NULL')
+    .replace(/DEFAULT\s*\(.*$/gi, 'DEFAULT NULL')
     .replace(/\s+/g, ' ')
     .trim();
   try {
