@@ -34,31 +34,37 @@ export default function LoginScreen({ onLogin }) {
   const handleLogin = async (e) => {
     e?.preventDefault();
     setBusy(true); setError(null);
-    const res = await api.login(selected.username, password);
-    setBusy(false);
-    if (res.error) { setError('Wrong password'); return; }
-    onLogin(res);
+    try {
+      const res = await api.login(selected.username, password);
+      onLogin(res);
+    } catch (err) {
+      setError(err?.status === 401 ? 'Wrong password' : (err?.message || 'Login failed'));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleSignup = async (e) => {
     e?.preventDefault();
     if (!newUser.trim() || !newPass.trim()) return;
     setBusy(true); setError(null);
-    const res = await api.signup(newUser.trim(), newPass.trim());
-    setBusy(false);
-    if (res.error) {
+    try {
+      await api.signup(newUser.trim(), newPass.trim());
+      // Refresh user list and return to selection screen — user logs in manually
+      const updated = await api.getUsers();
+      setUsers(updated);
+      setNewUser(''); setNewPass('');
+      setView('list');
+    } catch (err) {
+      const msg = err?.message || 'Signup failed';
       setError(
-        res.error === 'Username taken'     ? 'That username is already taken' :
-        res.error === 'User limit reached' ? 'Max 3 users allowed'            :
-        res.error
+        msg === 'Username taken'     ? 'That username is already taken' :
+        msg === 'User limit reached' ? 'Max 3 users allowed'            :
+        msg
       );
-      return;
+    } finally {
+      setBusy(false);
     }
-    // Refresh user list and return to selection screen — user logs in manually
-    const updated = await api.getUsers();
-    setUsers(updated);
-    setNewUser(''); setNewPass('');
-    setView('list');
   };
 
   return (

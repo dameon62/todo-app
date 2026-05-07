@@ -5,29 +5,48 @@ import LoginScreen from '@/components/LoginScreen.jsx';
 
 // ---------- Helpers ----------
 const DAY = 24 * 60 * 60 * 1000;
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const addDays = (base, d) => {
-  const n = new Date(base);
-  n.setDate(n.getDate() + d);
-  return n.toISOString().slice(0, 10);
+const todayISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+// Parse a YYYY-MM-DD ISO date as a local-midnight Date. Avoids the
+// `new Date('2026-05-08')` UTC-midnight pitfall which can shift days
+// across timezones.
+const parseLocalDate = (iso) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d);
+};
+const todayMidnight = () => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
 };
 const fmtDue = (iso) => {
   if (!iso) return 'No date';
-  const d = new Date(iso + 'T12:00:00');
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  const target = new Date(d); target.setHours(0, 0, 0, 0);
-  const diff = Math.round((target - now) / DAY);
+  const target = parseLocalDate(iso);
+  const diff = Math.round((target - todayMidnight()) / DAY);
   if (diff === 0) return 'Today';
   if (diff === 1) return 'Tomorrow';
   if (diff === -1) return 'Yesterday';
-  if (diff > 1 && diff < 7) return d.toLocaleDateString(undefined, { weekday: 'long' });
+  if (diff > 1 && diff < 7) return target.toLocaleDateString(undefined, { weekday: 'long' });
   if (diff >= 7 && diff < 14) return 'Next week';
   if (diff >= 14 && diff < 31) return `In ${Math.round(diff / 7)} wks`;
   if (diff < 0) return `${Math.abs(diff)}d overdue`;
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return target.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
-const isOverdue = (iso) => iso && new Date(iso + 'T23:59:59') < new Date();
+const isOverdue = (iso) => !!iso && parseLocalDate(iso) < todayMidnight();
+
+// Random task id — avoids collisions when two tasks are created in the same ms
+const newTaskId = (colKey) => {
+  const rand = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${colKey}-${rand}`;
+};
+
+// Swallow fire-and-forget mutation rejections so they don't surface as
+// "Unhandled Promise Rejection" warnings. Logged for debugging.
+const fireAndForget = (p) => { p.catch(err => console.warn('mutation failed:', err)); };
 
 const EMPTY_BOARD = { short: [], medium: [], long: [] };
 
@@ -50,6 +69,9 @@ const COLUMNS = [
   { key: 'medium', title: 'Medium term', subtitle: 'This quarter', flex: 30, hue: 'yellow', noDueDate: false },
   { key: 'long',   title: 'Long term',   subtitle: 'This year',    flex: 20, hue: 'blue', noDueDate: true },
 ];
+
+// Hue lookup for archived tasks — replaces the dropped `origin_hue` DB column
+const HUE_BY_COL = { short: 'green', medium: 'yellow', long: 'blue' };
 
 
 // ---------- Icons ----------
@@ -346,9 +368,14 @@ function TopBar({ theme, onToggleTheme, query, setQuery, view, setView, archiveC
 
   useEffect(() => {
     if (!menuOpen) return;
-    const handler = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    const onMouse = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
+    const onKey   = (e) => { if (e.key === 'Escape') setMenuOpen(false); };
+    document.addEventListener('mousedown', onMouse);
+    document.addEventListener('keydown',   onKey);
+    return () => {
+      document.removeEventListener('mousedown', onMouse);
+      document.removeEventListener('keydown',   onKey);
+    };
   }, [menuOpen]);
 
   const handleDelete = async () => {
@@ -801,7 +828,7 @@ function ArchiveView({ archived }) {
               <TaskRow
                 key={t.id}
                 task={t}
-                colHue={t._origin}
+                colHue={HUE_BY_COL[t.colKey] || 'blue'}
                 archiveView
               />
             ))}
@@ -892,7 +919,7 @@ export default function App() {
 
   const toggleTheme = () => setTheme((t) => {
     const next = t === 'dark' ? 'light' : 'dark';
-    api.setTheme(next);
+    fireAndForget(api.setTheme(next));
     return next;
   });
 
@@ -907,7 +934,7 @@ export default function App() {
       }
       return next;
     });
-    api.patchTask(id, { done: 1, completed_at: now });
+    fireAndForget(api.patchTask(id, { done: 1, completed_at: now }));
   };
 
   const onPatch = (id, patch) => {
@@ -917,11 +944,11 @@ export default function App() {
       return next;
     });
     setArchive((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
-    api.patchTask(id, patch);
+    fireAndForget(api.patchTask(id, patch));
   };
 
   const onAdd = (colKey, { text, tag, due }) => {
-    const id = `${colKey}-${Date.now()}`;
+    const id = newTaskId(colKey);
     setBoard((prev) => ({
       ...prev,
       [colKey]: [
@@ -929,22 +956,35 @@ export default function App() {
         ...prev[colKey],
       ],
     }));
-    api.createTask({ id, col_key: colKey, text, tag, due, priority: 'med' });
+    fireAndForget(api.createTask({ id, col_key: colKey, text, tag, due, priority: 'med' }));
   };
 
   const onAddTag = (t) => {
     setTags((prev) => (prev.includes(t) ? prev : [...prev, t]));
-    api.addTag(t);
+    fireAndForget(api.addTag(t));
   };
 
-  const onRenameTag = (oldName, newName) => {
+  const onRenameTag = async (oldName, newName) => {
+    // Optimistic update
     setTags((prev) => prev.map((t) => (t === oldName ? newName : t)));
     setBoard((prev) => {
       const next = { ...prev };
       for (const k of Object.keys(next)) next[k] = next[k].map((t) => (t.tag === oldName ? { ...t, tag: newName } : t));
       return next;
     });
-    api.renameTag(oldName, newName);
+    try {
+      await api.renameTag(oldName, newName);
+    } catch (err) {
+      // Resync from server and surface the reason
+      try {
+        const [tagsData, boardData] = await Promise.all([api.getTags(), api.getBoard()]);
+        setTags(tagsData);
+        setBoard(boardData);
+      } catch { /* ignore — leave optimistic state if resync also fails */ }
+      if (err?.status === 409) alert(`A tag named "${newName}" already exists.`);
+      else if (err?.status === 400) alert('Invalid tag name.');
+      else alert('Could not rename tag.');
+    }
   };
 
   const onDeleteTag = (name) => {
@@ -954,7 +994,7 @@ export default function App() {
       for (const k of Object.keys(next)) next[k] = next[k].map((t) => (t.tag === name ? { ...t, tag: null } : t));
       return next;
     });
-    api.deleteTag(name);
+    fireAndForget(api.deleteTag(name));
   };
 
   const filterAndSort = (list) => {
