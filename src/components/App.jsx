@@ -756,14 +756,14 @@ function NewTaskComposer({ colKey, tags, onAdd, onAddTag, onCancel, noDueDate })
 }
 
 // ---------- Column ----------
-function Column({ col, tasks, hoveredKey, setHoveredKey, tags, onToggle, onCancelTask, onPatch, onAdd, onAddTag, popStrength }) {
+function Column({ col, tasks, rawTasks, hoveredKey, setHoveredKey, tags, onToggle, onCancelTask, onPatch, onAdd, onAddTag, popStrength }) {
   const [adding, setAdding] = useState(false);
 
   const open = hoveredKey === col.key;
   const dimmed = hoveredKey && hoveredKey !== col.key;
 
-  const remaining = tasks.filter((t) => !t.done && !t.cancelled).length;
-  const total = tasks.length;
+  const remaining = (rawTasks ?? tasks).filter((t) => !t.done && !t.cancelled).length;
+  const total     = (rawTasks ?? tasks).length;
 
   const baseGrow = col.flex;
   const hoverBoost = open ? baseGrow * (popStrength / 100) : 0;
@@ -1189,6 +1189,7 @@ export default function App() {
               <Column
                 col={col}
                 tasks={filterAndSort(board[col.key])}
+                rawTasks={board[col.key]}
                 hoveredKey={hoveredKey}
                 setHoveredKey={setHoveredKey}
                 tags={tags}
