@@ -159,6 +159,17 @@ const Icon = {
       <path d="M6 3l5 5-5 5" />
     </svg>
   ),
+  Eye: (p) => (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z" />
+      <circle cx="8" cy="8" r="2" />
+    </svg>
+  ),
+  EyeOff: (p) => (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M2 2l12 12M6.8 6.9a2 2 0 002.3 2.3M4.8 4.2C3.2 5.2 2 6.9 2 8c1.3 2.4 3.5 4 6 4 1 0 2-.2 2.9-.6M8.5 4.1C10.8 4.5 12.7 6.1 14 8a8.6 8.6 0 01-1.4 2" />
+    </svg>
+  ),
 };
 
 // ---------- Popover (click-outside + ESC + hover-close) ----------
@@ -356,6 +367,60 @@ function DatePicker({ value, onPick, onClose }) {
   );
 }
 
+// ---------- Section picker (mobile only) ----------
+function SectionPicker({ mobileCol, setMobileCol }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open || !menuRef.current || !wrapRef.current) return;
+    const tr = wrapRef.current.getBoundingClientRect();
+    const er = menuRef.current.getBoundingClientRect();
+    const vw = window.innerWidth;
+    menuRef.current.style.position = 'fixed';
+    menuRef.current.style.top  = `${tr.bottom + 6}px`;
+    let left = tr.right - er.width;
+    if (left < 8) left = 8;
+    menuRef.current.style.left = `${left}px`;
+  }, [open]);
+
+  const current = COLUMNS.find(c => c.key === mobileCol);
+
+  return (
+    <div className="section-picker" ref={wrapRef}>
+      <button className="icon-btn section-picker-btn" data-hue={current.hue} onClick={() => setOpen(v => !v)}>
+        <span className="col-dot section-picker-dot" />
+        <span className="icon-btn-label">{current.title}</span>
+        <Icon.ChevronRight style={{ transform: open ? 'rotate(-90deg)' : 'rotate(90deg)', transition: 'transform .15s' }} />
+      </button>
+      {open && (
+        <div className="pop section-picker-menu" ref={menuRef} role="listbox">
+          {COLUMNS.map(c => (
+            <button
+              key={c.key}
+              className={`pop-item ${c.key === mobileCol ? 'on' : ''}`}
+              data-hue={c.hue}
+              onClick={() => { setMobileCol(c.key); setOpen(false); }}
+            >
+              <span className="col-dot" style={{ width: 8, height: 8, flexShrink: 0 }} />
+              <span>{c.title}</span>
+              {c.key === mobileCol && <span className="pop-check"><Icon.Check /></span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------- Avatar dropdown ----------
 function AvatarMenu({ menuRef, user, onLogout, onDelete }) {
   const popRef = useRef(null);
@@ -401,7 +466,7 @@ function DeleteConfirmModal({ username, onConfirm, onCancel }) {
 }
 
 // ---------- Top bar ----------
-function TopBar({ theme, onToggleTheme, query, setQuery, view, setView, archiveCount, user, onLogout, onDeleteAccount }) {
+function TopBar({ theme, onToggleTheme, query, setQuery, view, setView, archiveCount, user, onLogout, onDeleteAccount, mobileCol, setMobileCol, showClosed, setShowClosed }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const menuRef = useRef(null);
@@ -480,6 +545,15 @@ function TopBar({ theme, onToggleTheme, query, setQuery, view, setView, archiveC
       </div>
 
       <div className="top-actions">
+        <button
+          className="icon-btn"
+          onClick={() => setShowClosed(v => !v)}
+          title={showClosed ? 'Hide completed & cancelled' : 'Show all tasks'}
+        >
+          {showClosed ? <Icon.Eye /> : <Icon.EyeOff />}
+          <span className="icon-btn-label">{showClosed ? 'All' : 'Open'}</span>
+        </button>
+        <SectionPicker mobileCol={mobileCol} setMobileCol={setMobileCol} />
         <button className="icon-btn theme-btn" onClick={onToggleTheme} title="Toggle theme">
           {theme === 'dark' ? <Icon.Moon /> : <Icon.Sun />}
           <span className="icon-btn-label">{theme === 'dark' ? 'Dark' : 'Light'}</span>
@@ -729,6 +803,7 @@ function Column({ col, tasks, hoveredKey, setHoveredKey, tags, onToggle, onCance
     <section
       className={`col ${open ? 'is-open' : ''} ${dimmed ? 'is-dim' : ''} ${split ? 'has-split' : ''}`}
       data-hue={col.hue}
+      data-col={col.key}
       style={{ flexGrow: grow, flexBasis: 0 }}
       onMouseEnter={() => setHoveredKey(col.key)}
       onMouseLeave={() => setHoveredKey(null)}
@@ -1061,11 +1136,16 @@ export default function App() {
     fireAndForget(api.deleteTag(name));
   };
 
+  const [mobileCol, setMobileCol]   = useState('short');
+  const [showClosed, setShowClosed] = useState(true);
+
   const filterAndSort = (list) => {
     const q = query.trim().toLowerCase();
-    return q
+    let out = q
       ? list.filter((t) => t.text.toLowerCase().includes(q) || (t.tag || '').toLowerCase().includes(q))
       : list;
+    if (!showClosed) out = out.filter((t) => !t.done && !t.cancelled);
+    return out;
   };
 
   const allTasks      = Object.values(board).flat();
@@ -1096,10 +1176,14 @@ export default function App() {
         user={user}
         onLogout={handleLogout}
         onDeleteAccount={handleDeleteAccount}
+        mobileCol={mobileCol}
+        setMobileCol={setMobileCol}
+        showClosed={showClosed}
+        setShowClosed={setShowClosed}
       />
 
       {view === 'board' ? (
-        <main className={`board ${hoveredKey ? 'has-hover' : ''}`} onMouseLeave={() => setHoveredKey(null)}>
+        <main className={`board ${hoveredKey ? 'has-hover' : ''}`} data-mobile-col={mobileCol} onMouseLeave={() => setHoveredKey(null)}>
           {COLUMNS.map((col) => (
             <React.Fragment key={col.key}>
               <Column

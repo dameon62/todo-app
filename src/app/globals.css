@@ -799,7 +799,7 @@ a { color: inherit; text-decoration: none; }
 .pop-search input { flex: 1; font-size: 13px; color: var(--ink); }
 .pop-title { padding: 6px 8px 8px; font-size: 11px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; font-family: var(--font-mono); }
 .pop-list { display: flex; flex-direction: column; padding: 4px 0; max-height: 240px; overflow-y: auto; }
-.pop-item { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 6px; text-align: left; font-size: 13px; color: var(--ink); transition: background .12s; }
+.pop-item { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 6px; text-align: left; font-size: 13px; color: var(--ink); transition: background .12s; width: 100%; }
 .pop-item:hover { background: var(--panel-lo); }
 .pop-item.on { background: var(--panel-lo); color: var(--ink); }
 .pop-item.create { color: var(--ink-2); border-top: 1px solid var(--line-soft); margin-top: 4px; padding-top: 9px; }
@@ -1067,6 +1067,22 @@ a { color: inherit; text-decoration: none; }
   text-transform: uppercase; letter-spacing: 0.06em;
 }
 
+/* Section picker — hidden on desktop, shown on mobile */
+.section-picker { display: none; position: relative; }
+.section-picker-btn {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  font-size: 12px; font-weight: 600;
+  color: var(--hue-ink, var(--ink-2));
+  background: var(--hue-soft, var(--panel-lo));
+  border: 1px solid var(--hue-soft, var(--line));
+  transition: background .15s, color .15s;
+}
+.section-picker-btn:hover { background: var(--hue-wash, var(--panel)); }
+.section-picker-dot { width: 8px; height: 8px; flex-shrink: 0; }
+.section-picker-menu { min-width: 180px; z-index: 1000; }
+
 /* Responsive */
 @media (max-width: 1280px) {
   .topbar { grid-template-columns: 1fr auto auto; }
@@ -1085,38 +1101,50 @@ a { color: inherit; text-decoration: none; }
   .nav { display: none; }
   .search { display: none; }
 
-  /* Columns now stack top→bottom: green / yellow / blue.
-     Rotate the board wash to match — gradient runs 180deg (top→bottom).
-     Mask fades left→right so the colour hugs the left edge. */
-  .board::before {
-    background: linear-gradient(
-      180deg,
-      var(--hue-green-base)  0%,
-      var(--hue-green-base)  10%,
-      color-mix(in oklab, var(--hue-green-base) 50%, var(--hue-yellow-base) 50%) 40%,
-      var(--hue-yellow-base) 60%,
-      color-mix(in oklab, var(--hue-yellow-base) 50%, var(--hue-blue-base) 50%) 80%,
-      var(--hue-blue-base)   92%,
-      var(--hue-blue-base)   100%
-    );
-    -webkit-mask-image: linear-gradient(90deg, rgba(0,0,0,0.28) 0%, rgba(0,0,0,0.18) 35%, rgba(0,0,0,0.10) 65%, transparent 100%);
-            mask-image: linear-gradient(90deg, rgba(0,0,0,0.28) 0%, rgba(0,0,0,0.18) 35%, rgba(0,0,0,0.10) 65%, transparent 100%);
+  /* Show only the active section; hidden ones are removed from flow */
+  .board[data-mobile-col="short"]  .col:not([data-col="short"])  { display: none; }
+  .board[data-mobile-col="medium"] .col:not([data-col="medium"]) { display: none; }
+  .board[data-mobile-col="long"]   .col:not([data-col="long"])   { display: none; }
+
+  /* Section picker visible only on mobile */
+  .section-picker { display: flex; }
+
+  /* Per-section colour themes — each section gets its own solid accent.
+     Accent stripe flips to vertical-left; board wash uses the section's hue. */
+
+  /* Short term — green */
+  .board[data-mobile-col="short"]::before {
+    background: var(--hue-green-base);
+    -webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,0.30) 0%, rgba(0,0,0,0.14) 40%, transparent 70%);
+            mask-image: linear-gradient(180deg, rgba(0,0,0,0.30) 0%, rgba(0,0,0,0.14) 40%, transparent 70%);
+  }
+  .board[data-mobile-col="short"]::after {
+    left: 14px; right: auto; top: 14px; bottom: 14px;
+    width: 3px; height: auto;
+    background: var(--hue-green-base);
   }
 
-  /* Accent stripe flips from horizontal-top to vertical-left */
-  .board::after {
-    left: 14px; right: auto;
-    top: 14px;  bottom: 14px;
+  /* Medium term — orange (uses hue-yellow-ink which is #F97316) */
+  .board[data-mobile-col="medium"]::before {
+    background: var(--hue-yellow-ink);
+    -webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,0.30) 0%, rgba(0,0,0,0.14) 40%, transparent 70%);
+            mask-image: linear-gradient(180deg, rgba(0,0,0,0.30) 0%, rgba(0,0,0,0.14) 40%, transparent 70%);
+  }
+  .board[data-mobile-col="medium"]::after {
+    left: 14px; right: auto; top: 14px; bottom: 14px;
     width: 3px; height: auto;
-    background: linear-gradient(
-      180deg,
-      var(--hue-green-base)  0%,
-      var(--hue-green-base)  10%,
-      color-mix(in oklab, var(--hue-green-base) 50%, var(--hue-yellow-base) 50%) 40%,
-      var(--hue-yellow-base) 60%,
-      color-mix(in oklab, var(--hue-yellow-base) 50%, var(--hue-blue-base) 50%) 80%,
-      var(--hue-blue-base)   92%,
-      var(--hue-blue-base)   100%
-    );
+    background: var(--hue-yellow-ink);
+  }
+
+  /* Long term — blue */
+  .board[data-mobile-col="long"]::before {
+    background: var(--hue-blue-base);
+    -webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,0.30) 0%, rgba(0,0,0,0.14) 40%, transparent 70%);
+            mask-image: linear-gradient(180deg, rgba(0,0,0,0.30) 0%, rgba(0,0,0,0.14) 40%, transparent 70%);
+  }
+  .board[data-mobile-col="long"]::after {
+    left: 14px; right: auto; top: 14px; bottom: 14px;
+    width: 3px; height: auto;
+    background: var(--hue-blue-base);
   }
 }
