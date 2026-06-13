@@ -188,9 +188,23 @@ export function rowToTask(row: Record<string, unknown>) {
   };
 }
 
+// Age after which a completed/cancelled task is swept into the archive.
+// Defaults to 30 days. Override with the ARCHIVE_AGE_MS env var (e.g. 60000 =
+// 1 minute) for local testing — set it in .env.local and restart the dev
+// server. Read per-call so the knob takes effect without code changes.
+// NOTE: the sweep is lazy + per-user — it only runs inside GET /api/board for
+// the requesting user, so a task archives on the first board load *after* this
+// age elapses (i.e. ">= age", not exactly at it), and an inactive user's tasks
+// don't archive until they next open the app.
+const DEFAULT_ARCHIVE_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+function archiveAgeMs() {
+  const v = Number(process.env.ARCHIVE_AGE_MS);
+  return Number.isFinite(v) && v > 0 ? v : DEFAULT_ARCHIVE_AGE_MS;
+}
+
 export async function sweepArchive(userId: number) {
   const db = await getDb();
-  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - archiveAgeMs();
   // Cheap predicate-check first: avoids a UPDATE round-trip on every board
   // load when there's nothing to archive (the common case).
   const probe = await db.execute({

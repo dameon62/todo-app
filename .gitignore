@@ -36,3 +36,8 @@ yarn-error.log*
 
 # Build artifacts
 *.tsbuildinfo
+
+# Claude Code & MCP
+.claude/
+.mcp.json
+.playwright-mcp/

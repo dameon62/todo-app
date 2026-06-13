@@ -573,14 +573,23 @@ function TopBar({ theme, onToggleTheme, query, setQuery, view, setView, archiveC
 }
 
 // ---------- Task row ----------
-function TaskRow({ task, colHue, tags, onToggle, onCancelTask, onPatch, onAddTag, archiveView, hideDate }) {
+function TaskRow({ task, colHue, tags, onToggle, onCancelTask, onPatch, onAddTag, archiveView, hideDate, selectedId = null, setSelectedId = () => {} }) {
   const [tagOpen, setTagOpen] = useState(false);
   const [dateOpen, setDateOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(task.text);
+  const textareaRef = useRef(null);
 
-  const overdue   = !task.done && !task.cancelled && isOverdue(task.due);
-  const readOnly  = !!archiveView || task.done || task.cancelled;
+  const overdue    = !task.done && !task.cancelled && isOverdue(task.due);
+  const readOnly   = !!archiveView || task.done || task.cancelled;
+  const isSelected = selectedId === task.id;
+  const isLocked   = !!selectedId && !isSelected;
+
+  useLayoutEffect(() => {
+    if (!textareaRef.current) return;
+    textareaRef.current.style.height = 'auto';
+    textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+  }, [draft, editing]);
 
   const saveText = () => {
     const v = draft.trim();
@@ -590,10 +599,18 @@ function TaskRow({ task, colHue, tags, onToggle, onCancelTask, onPatch, onAddTag
   };
 
   return (
-    <li className={`task ${task.done ? 'is-done' : ''} ${task.cancelled ? 'is-cancelled' : ''} ${overdue ? 'is-overdue' : ''} ${readOnly ? 'read-only' : ''}`} data-hue={colHue}>
+    <li
+      className={`task ${task.done ? 'is-done' : ''} ${task.cancelled ? 'is-cancelled' : ''} ${overdue ? 'is-overdue' : ''} ${readOnly ? 'read-only' : ''} ${isSelected ? 'is-selected' : ''} ${isLocked ? 'is-locked' : ''}`}
+      data-hue={colHue}
+      onClick={() => {
+        if (readOnly) { if (isLocked) setSelectedId(null); return; } // not selectable; clicking it clears any selection
+        if (isLocked) { setSelectedId(task.id); return; }
+        if (!isSelected) setSelectedId(task.id);
+      }}
+    >
       <button
         className={`check ${task.done ? 'on' : ''} ${task.cancelled ? 'cancelled' : ''}`}
-        onClick={() => { if (!task.done && !task.cancelled) onToggle(task.id); }}
+        onClick={(e) => { e.stopPropagation(); if (isLocked) { setSelectedId(task.id); return; } if (!task.done && !task.cancelled) { onToggle(task.id); setSelectedId(null); } }}
         disabled={task.done || task.cancelled}
         aria-label={task.cancelled ? 'Cancelled' : 'Mark complete'}
       >
@@ -602,23 +619,31 @@ function TaskRow({ task, colHue, tags, onToggle, onCancelTask, onPatch, onAddTag
 
       <div className="task-body">
         {editing && !readOnly && !task.done && !task.cancelled ? (
-          <input
+          <textarea
+            ref={textareaRef}
             autoFocus
             className="task-text-input"
             value={draft}
             maxLength={150}
+            rows={1}
             onChange={(e) => setDraft(e.target.value)}
             onBlur={saveText}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') saveText();
-              if (e.key === 'Escape') { setDraft(task.text); setEditing(false); }
+              if (e.key === 'Enter') { e.preventDefault(); saveText(); }
+              if (e.key === 'Escape') { e.stopPropagation(); setDraft(task.text); setEditing(false); }
             }}
           />
         ) : (
           <div
             className="task-text"
-            onClick={() => { if (!readOnly && !task.done && !task.cancelled) { setDraft(task.text); setEditing(true); } }}
-            title={readOnly || task.done ? '' : 'Click to edit'}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (readOnly || task.done || task.cancelled) { if (isLocked) setSelectedId(null); return; }
+              if (isLocked) { setSelectedId(task.id); return; }
+              if (isSelected) { setDraft(task.text); setEditing(true); }
+              else setSelectedId(task.id);
+            }}
+            title={readOnly || task.done ? '' : isSelected ? 'Click to edit' : 'Click to select'}
           >
             {task.text}
           </div>
@@ -628,7 +653,7 @@ function TaskRow({ task, colHue, tags, onToggle, onCancelTask, onPatch, onAddTag
             <button
               className="meta-chip tag-chip"
               disabled={readOnly}
-              onClick={(e) => { if (readOnly) return; e.stopPropagation(); setTagOpen((v) => !v); setDateOpen(false); }}
+              onClick={(e) => { if (readOnly) return; e.stopPropagation(); if (isLocked) { setSelectedId(task.id); return; } setTagOpen((v) => !v); setDateOpen(false); }}
             >
               <span className="tag-dot" style={{ background: tagColor(task.tag) }} />
               <span>{task.tag || 'No tag'}</span>
@@ -651,7 +676,7 @@ function TaskRow({ task, colHue, tags, onToggle, onCancelTask, onPatch, onAddTag
               <button
                 className={`meta-chip date-chip ${overdue ? 'overdue' : ''}`}
                 disabled={readOnly}
-                onClick={(e) => { if (readOnly) return; e.stopPropagation(); setDateOpen((v) => !v); setTagOpen(false); }}
+                onClick={(e) => { if (readOnly) return; e.stopPropagation(); if (isLocked) { setSelectedId(task.id); return; } setDateOpen((v) => !v); setTagOpen(false); }}
               >
                 <Icon.Calendar />
                 <span>{fmtDue(task.due)}</span>
@@ -679,7 +704,7 @@ function TaskRow({ task, colHue, tags, onToggle, onCancelTask, onPatch, onAddTag
       {!readOnly && !task.done && !task.cancelled && (
         <button
           className="task-cancel-btn"
-          onClick={() => onCancelTask(task.id)}
+          onClick={(e) => { e.stopPropagation(); if (isLocked) { setSelectedId(task.id); return; } onCancelTask(task.id); setSelectedId(null); }}
           title="Cancel task"
         >
           <Icon.X />
@@ -756,7 +781,7 @@ function NewTaskComposer({ colKey, tags, onAdd, onAddTag, onCancel, noDueDate })
 }
 
 // ---------- Column ----------
-function Column({ col, tasks, rawTasks, hoveredKey, setHoveredKey, tags, onToggle, onCancelTask, onPatch, onAdd, onAddTag, popStrength }) {
+function Column({ col, tasks, rawTasks, hoveredKey, setHoveredKey, selectedId, setSelectedId, tags, onToggle, onCancelTask, onPatch, onAdd, onAddTag, popStrength }) {
   const [adding, setAdding] = useState(false);
 
   const open = hoveredKey === col.key;
@@ -791,6 +816,8 @@ function Column({ col, tasks, rawTasks, hoveredKey, setHoveredKey, tags, onToggl
           onPatch={onPatch}
           onAddTag={onAddTag}
           hideDate={col.noDueDate}
+          selectedId={selectedId}
+          setSelectedId={setSelectedId}
         />
       ))}
       {list.length === 0 && (
@@ -805,7 +832,7 @@ function Column({ col, tasks, rawTasks, hoveredKey, setHoveredKey, tags, onToggl
       data-hue={col.hue}
       data-col={col.key}
       style={{ flexGrow: grow, flexBasis: 0 }}
-      onMouseEnter={() => setHoveredKey(col.key)}
+      onMouseEnter={() => { if (!selectedId) setHoveredKey(col.key); }}
       onMouseLeave={() => setHoveredKey(null)}
     >
       <div className="col-inner">
@@ -844,7 +871,7 @@ function Column({ col, tasks, rawTasks, hoveredKey, setHoveredKey, tags, onToggl
             noDueDate={col.noDueDate}
           />
         ) : (
-          <button className="add-row" onClick={() => setAdding(true)}>
+          <button className="add-row" onClick={() => { setSelectedId(null); setAdding(true); }}>
             <span className="plus"><Icon.Plus /></span>
             <span>Add a {col.title.toLowerCase()} task</span>
           </button>
@@ -1138,6 +1165,30 @@ export default function App() {
 
   const [mobileCol, setMobileCol]   = useState('short');
   const [showClosed, setShowClosed] = useState(true);
+  const [selectedId, setSelectedId] = useState(null);
+
+  useEffect(() => { setSelectedId(null); }, [view]);
+  useEffect(() => { if (selectedId) setHoveredKey(null); }, [selectedId]);
+  useEffect(() => {
+    if (!selectedId) return;
+    const h = (e) => {
+      if (e.target.closest('.task')) return;
+      setSelectedId(null);
+    };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [selectedId]);
+  useEffect(() => {
+    if (!selectedId) return;
+    const h = (e) => {
+      if (e.key !== 'Escape') return;
+      if (document.activeElement?.classList.contains('task-text-input')) return;
+      if (e.target.closest?.('.pop')) return; // let an open tag/date picker own its Escape
+      setSelectedId(null);
+    };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, [selectedId]);
 
   const filterAndSort = (list) => {
     const q = query.trim().toLowerCase();
@@ -1183,7 +1234,7 @@ export default function App() {
       />
 
       {view === 'board' ? (
-        <main className={`board ${hoveredKey ? 'has-hover' : ''}`} data-mobile-col={mobileCol} onMouseLeave={() => setHoveredKey(null)}>
+        <main className={`board ${hoveredKey ? 'has-hover' : ''} ${selectedId ? 'has-selection' : ''}`} data-mobile-col={mobileCol} onMouseLeave={() => setHoveredKey(null)}>
           {COLUMNS.map((col) => (
             <React.Fragment key={col.key}>
               <Column
@@ -1192,6 +1243,8 @@ export default function App() {
                 rawTasks={board[col.key]}
                 hoveredKey={hoveredKey}
                 setHoveredKey={setHoveredKey}
+                selectedId={selectedId}
+                setSelectedId={setSelectedId}
                 tags={tags}
                 onToggle={onToggle}
                 onCancelTask={onCancelTask}
