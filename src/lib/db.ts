@@ -34,7 +34,7 @@ const ACT_DEF = `INTEGER NOT NULL DEFAULT 1`;
 // and `runInit` short-circuits after a single SELECT. This is the cold-start
 // fast path: previously every cold container ran 8+ ALTER TABLE round-trips.
 // Bump this string whenever the schema or migration block changes.
-const SCHEMA_SENTINEL = 'schema_v3';
+const SCHEMA_SENTINEL = 'schema_v4';
 
 export async function getDb() {
   if (ready) return db;
@@ -101,6 +101,7 @@ async function runInit() {
       is_archived  INTEGER NOT NULL DEFAULT 0   CHECK (is_archived IN (0,1)),
       is_active    INTEGER NOT NULL DEFAULT 1   CHECK (is_active IN (0,1)),
       cancelled    INTEGER NOT NULL DEFAULT 0   CHECK (cancelled IN (0,1)),
+      urgent       INTEGER NOT NULL DEFAULT 0   CHECK (urgent IN (0,1)),
       created_at   INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
     );
     CREATE TABLE IF NOT EXISTS tags (
@@ -129,6 +130,7 @@ async function runInit() {
   await addColumnIfMissing('tags',     'is_active', ACT_DEF);
   await addColumnIfMissing('settings', 'is_active', ACT_DEF);
   await addColumnIfMissing('tasks',    'cancelled',  'INTEGER NOT NULL DEFAULT 0');
+  await addColumnIfMissing('tasks',    'urgent',     'INTEGER NOT NULL DEFAULT 0');
 
   // Drop the now-unused `origin_hue` column on existing DBs. The frontend
   // derives the archive hue from `col_key` instead. ALTER TABLE DROP COLUMN
@@ -182,6 +184,7 @@ export function rowToTask(row: Record<string, unknown>) {
     tag:         (row.tag         as string | null) ?? null,
     done:        row.done        === 1,
     cancelled:   row.cancelled   === 1,
+    urgent:      row.urgent      === 1,
     priority:    row.priority    as string,
     completedAt: (row.completed_at as number | null) ?? null,
     colKey:      (row.col_key     as string | null) ?? null,

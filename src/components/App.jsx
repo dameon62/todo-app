@@ -573,7 +573,7 @@ function TopBar({ theme, onToggleTheme, query, setQuery, view, setView, archiveC
 }
 
 // ---------- Task row ----------
-function TaskRow({ task, colHue, tags, onToggle, onCancelTask, onPatch, onAddTag, archiveView, hideDate, selectedId = null, setSelectedId = () => {} }) {
+function TaskRow({ task, colHue, tags, onToggle, onCancelTask, onPatch, onAddTag, onToggleUrgent = () => {}, urgentFull = false, archiveView, hideDate, selectedId = null, setSelectedId = () => {} }) {
   const [tagOpen, setTagOpen] = useState(false);
   const [dateOpen, setDateOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -691,6 +691,18 @@ function TaskRow({ task, colHue, tags, onToggle, onCancelTask, onPatch, onAddTag
             </div>
           )}
 
+          {!readOnly && (
+            <button
+              type="button"
+              className={`task-urgent-btn ${task.urgent ? 'on' : ''}`}
+              disabled={!task.urgent && urgentFull}
+              aria-pressed={!!task.urgent}
+              aria-label="Mark urgent"
+              title={task.urgent ? 'Urgent — click to clear' : (urgentFull ? `Maximum ${URGENT_LIMIT} urgent tasks` : 'Mark urgent')}
+              onClick={(e) => { e.stopPropagation(); if (isLocked) { setSelectedId(task.id); return; } onToggleUrgent(task.id); }}
+            />
+          )}
+
           {archiveView && task.completedAt && (
             <>
               <span className="dot-sep">·</span>
@@ -781,7 +793,7 @@ function NewTaskComposer({ colKey, tags, onAdd, onAddTag, onCancel, noDueDate })
 }
 
 // ---------- Column ----------
-function Column({ col, tasks, rawTasks, hoveredKey, setHoveredKey, selectedId, setSelectedId, tags, onToggle, onCancelTask, onPatch, onAdd, onAddTag, popStrength }) {
+function Column({ col, tasks, rawTasks, hoveredKey, setHoveredKey, selectedId, setSelectedId, tags, onToggle, onCancelTask, onPatch, onAdd, onAddTag, onToggleUrgent, urgentFull, popStrength }) {
   const [adding, setAdding] = useState(false);
 
   const open = hoveredKey === col.key;
@@ -815,6 +827,8 @@ function Column({ col, tasks, rawTasks, hoveredKey, setHoveredKey, selectedId, s
           onCancelTask={onCancelTask}
           onPatch={onPatch}
           onAddTag={onAddTag}
+          onToggleUrgent={onToggleUrgent}
+          urgentFull={urgentFull}
           hideDate={col.noDueDate}
           selectedId={selectedId}
           setSelectedId={setSelectedId}
@@ -992,6 +1006,10 @@ function ArchiveView({ archived }) {
 }
 
 const POP_STRENGTH = 35;
+// Max tasks that can be flagged urgent at once (across all columns).
+// Override with NEXT_PUBLIC_URGENT_LIMIT; falls back to 5. Restart the dev server
+// after changing it (NEXT_PUBLIC_* vars are inlined at build time).
+const URGENT_LIMIT = Math.max(1, Math.floor(Number(process.env.NEXT_PUBLIC_URGENT_LIMIT)) || 5);
 
 // ---------- App ----------
 export default function App() {
@@ -1113,12 +1131,31 @@ export default function App() {
     fireAndForget(api.patchTask(id, patch));
   };
 
+  const urgentCount = useMemo(
+    () => Object.values(board).flat().filter((t) => t.urgent && !t.done && !t.cancelled).length,
+    [board]
+  );
+  const urgentFull = urgentCount >= URGENT_LIMIT;
+
+  const onToggleUrgent = (id) => {
+    const task = Object.values(board).flat().find((t) => t.id === id);
+    if (!task) return;
+    const willBe = !task.urgent;
+    if (willBe && urgentFull) return; // cap guard (UI also disables this)
+    setBoard((prev) => {
+      const next = { ...prev };
+      for (const k of Object.keys(next)) next[k] = next[k].map((t) => (t.id === id ? { ...t, urgent: willBe } : t));
+      return next;
+    });
+    fireAndForget(api.patchTask(id, { urgent: willBe ? 1 : 0 }));
+  };
+
   const onAdd = (colKey, { text, tag, due }) => {
     const id = newTaskId(colKey);
     setBoard((prev) => ({
       ...prev,
       [colKey]: [
-        { id, text, tag, due, done: false, cancelled: false, priority: 'med', completedAt: null },
+        { id, text, tag, due, done: false, cancelled: false, urgent: false, priority: 'med', completedAt: null },
         ...prev[colKey],
       ],
     }));
@@ -1251,6 +1288,8 @@ export default function App() {
                 onPatch={onPatch}
                 onAdd={onAdd}
                 onAddTag={onAddTag}
+                onToggleUrgent={onToggleUrgent}
+                urgentFull={urgentFull}
                 popStrength={POP_STRENGTH}
               />
             </React.Fragment>

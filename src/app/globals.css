@@ -652,6 +652,43 @@ a { color: inherit; text-decoration: none; }
 .task:hover .task-cancel-btn { opacity: 1; }
 .task-cancel-btn:hover { background: var(--cancelled-soft); color: var(--cancelled); }
 
+/* Urgent toggle — round, hover-revealed when off, red + breathing when on */
+.task-urgent-btn {
+  flex: 0 0 auto;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line);
+  background: transparent;
+  color: var(--ink-3);
+  opacity: 0;                                 /* off: hidden until hover/select */
+  cursor: pointer;
+  transition: opacity .15s, background .15s, border-color .15s, box-shadow .15s;
+}
+.task:hover .task-urgent-btn,
+.task.is-selected .task-urgent-btn { opacity: 1; }
+.task-urgent-btn:hover { border-color: var(--hue-red-base); color: var(--hue-red-ink); }
+
+/* on: always visible, filled red, breathing */
+.task-urgent-btn.on {
+  opacity: 1;
+  background: var(--hue-red-base);
+  border-color: var(--hue-red-base);
+  animation: urgentBreathe 1.8s ease-in-out infinite;
+}
+
+/* disabled (cap reached, this card not urgent): dim, no-op */
+.task-urgent-btn:disabled { cursor: not-allowed; }
+.task:hover .task-urgent-btn:disabled,
+.task.is-selected .task-urgent-btn:disabled { opacity: 0.4; }
+
+@keyframes urgentBreathe {
+  0%, 100% { transform: scale(1);    box-shadow: 0 0 0 0 var(--hue-red-soft); }
+  50%      { transform: scale(1.12); box-shadow: 0 0 4px 1px var(--hue-red-soft); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-urgent-btn.on { animation: none; }
+}
+
 .task-body { flex: 1 1 0; min-width: 0; overflow: hidden; }
 .task-text {
   font-size: 13.5px;

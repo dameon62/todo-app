@@ -4,7 +4,7 @@ import { getUserId, unauthorized } from '@/lib/auth';
 
 const ALLOWED: Record<string, boolean> = {
   text: true, due: true, tag: true, done: true, cancelled: true,
-  priority: true, completed_at: true, is_archived: true,
+  priority: true, completed_at: true, is_archived: true, urgent: true,
 };
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -18,7 +18,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const args = cols.map(k => {
     const v = patch[k];
-    return (k === 'done' || k === 'is_archived' || k === 'cancelled') ? (v ? 1 : 0) : (v ?? null);
+    return (k === 'done' || k === 'is_archived' || k === 'cancelled' || k === 'urgent') ? (v ? 1 : 0) : (v ?? null);
   });
   args.push(userId, id);
 
